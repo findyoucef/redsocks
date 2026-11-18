@@ -50,8 +50,11 @@ class ProxyHandler(socketserver.BaseRequestHandler):
                     headers += receive(sock, 1)
                     if len(headers) > 16384:
                         raise ValueError("oversized CONNECT request")
-                if not headers.startswith(b"CONNECT 127.0.0.1:"):
+                if not headers.startswith(f"CONNECT {self.server.destination}:".encode()):
                     raise ValueError("incorrect original destination")
+                if self.server.destination_port is not None and not headers.startswith(
+                        f"CONNECT {self.server.destination}:{self.server.destination_port} ".encode()):
+                    raise ValueError("incorrect original port")
                 if self.server.auth:
                     expected = b"Proxy-Authorization: Basic " + base64.b64encode(b"user:pass")
                     if expected.lower() not in headers.lower():
@@ -70,8 +73,10 @@ class ProxyHandler(socketserver.BaseRequestHandler):
                 if receive(sock, 4) != b"\x05\x01\x00\x01":
                     raise ValueError("invalid IPv4 SOCKS5 CONNECT")
                 destination = receive(sock, 6)
-                if destination[:4] != socket.inet_aton("127.0.0.1"):
+                if destination[:4] != socket.inet_aton(self.server.destination):
                     raise ValueError("incorrect SOCKS5 original destination")
+                if self.server.destination_port is not None and int.from_bytes(destination[4:], "big") != self.server.destination_port:
+                    raise ValueError("incorrect SOCKS5 original port")
                 sock.sendall(b"\x05\x00\x00\x01\x7f\x00\x00\x01\x00\x01")
             while True:
                 data = sock.recv(65536)
@@ -86,9 +91,11 @@ class ProxyHandler(socketserver.BaseRequestHandler):
 
 
 @contextlib.contextmanager
-def proxy(protocol="http-connect", auth=False):
+def proxy(protocol="http-connect", auth=False, destination="127.0.0.1", destination_port=None):
     with Proxy(("127.0.0.1", 0), ProxyHandler) as server:
         server.protocol, server.auth = protocol, auth
+        server.destination = destination
+        server.destination_port = destination_port
         server.errors, server.challenges = [], 0
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -101,11 +108,11 @@ def proxy(protocol="http-connect", auth=False):
             raise AssertionError(server.errors)
 
 
-def configuration(port, upstream, protocol, extra="", auth=False):
+def configuration(port, upstream, protocol, extra="", auth=False, backend="generic"):
     credentials = 'login = "user"; password = "pass";' if auth else ""
     return f"""base {{
         log = stderr; log_info = on; log_debug = off;
-        daemon = off; redirector = generic; {extra}
+        daemon = off; redirector = {backend}; {extra}
     }}
     redsocks {{
         local_ip = 127.0.0.1; local_port = {port};
@@ -116,14 +123,14 @@ def configuration(port, upstream, protocol, extra="", auth=False):
 
 
 @contextlib.contextmanager
-def redirector(server, extra=""):
+def redirector(server, extra="", backend="generic"):
     with tempfile.TemporaryDirectory(prefix="redsocks-test-") as tmp:
         with socket.socket() as reservation:
             reservation.bind(("127.0.0.1", 0))
             port = reservation.getsockname()[1]
         config = Path(tmp) / "redsocks.conf"
         config.write_text(configuration(port, server.server_address[1],
-                                        server.protocol, extra, server.auth))
+                                        server.protocol, extra, server.auth, backend))
         with (Path(tmp) / "stderr").open("w+") as log:
             process = subprocess.Popen([str(BINARY), "-c", str(config)],
                                        stdout=log, stderr=log)
