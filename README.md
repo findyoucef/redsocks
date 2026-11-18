@@ -157,7 +157,7 @@ You can get a copy at http://www.apache.org/licenses/LICENSE-2.0.html
 
 ## Compilation
 
-[libevent-2.0.x](http://libevent.org/) is required.
+[libevent 2.x](https://libevent.org/) is required.
 
 gcc and clang are supported right now, other compilers can be used
 but may require some code changes.

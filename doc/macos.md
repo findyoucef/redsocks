@@ -18,7 +18,7 @@ make check
 
 The Makefile discovers Homebrew's libevent prefix on Intel and Apple Silicon.
 For a different installation, use `make LIBEVENT_PREFIX=/path/to/libevent`.
-Run `make clean` when changing compiler, target, `DBG_BUILD`, or `REDUDP`.
+Run `make clean` when changing compiler, target, `DBG_BUILD`, `REDUDP`, or `DNSU2T`.
 The optional `make install PREFIX=/usr/local` installs the binary in
 `/usr/local/sbin`; it requires permission to write there.
 
@@ -100,20 +100,41 @@ PF globally if another service uses it.
   directly; this configuration is not a system-wide traffic containment policy.
 - Linux transparent UDP (`redudp`) is excluded on macOS. Linux retains it by
   default; `REDUDP=0` can disable it there too.
-- `dnstc` and `dnsu2t` remain available, but need explicit resolver configuration.
-  `dnsu2t` creates its own TCP connection, which must itself be captured if it
-  needs to traverse the upstream proxy. With the example's `nobody` exclusion,
-  that connection is direct. An external DNS-over-SOCKS resolver is another option.
+- `dnstc` remains available but needs explicit resolver configuration. The
+  `dnsu2t` helper is excluded on macOS because it uses Linux `MSG_FASTOPEN` and
+  GNU `tdestroy`; Linux retains it by default (`DNSU2T=0` disables it). Use an
+  external DNS-over-SOCKS resolver when DNS must traverse the upstream proxy.
 - The small `pf-darwin.h` declaration matches Apple's private DIOCNATLOOK ABI.
   Compile-time layout checks do not prove kernel compatibility; runtime lookup
   needs verification on each supported macOS release.
 
-## Verification status of this change
+## Verification
 
-The development session could compile the PF ABI declarations and validate the
-sample anchor with `pfctl -n`. It could not build the full daemon (libevent is
-not installed), bind loopback test sockets (sandbox restriction), or publish to
-GitHub (terminal network and credential restrictions). The GitHub Actions
-matrix is prepared for Linux/GCC, Linux/Clang, Intel macOS and Apple Silicon,
-but has not run. Treat the port as unverified until those checks and the PF
-exercise above pass.
+The native macOS build and debug build pass with Clang and libevent 2.1.13 on
+Apple Silicon. All five portable regression tests pass. Linux builds and the
+same tests also pass with GCC and Clang in Debian; the curated fixes branch is
+tested separately before the macOS changes. Negative controls confirm that
+reverting #123 or #100 makes its corresponding regression test fail.
+
+The PF ABI layout checks compile for both arm64 and x86_64, and the sample
+anchor passes `pfctl -n`. GitHub Actions additionally covers Linux/GCC,
+Linux/Clang, Intel macOS and Apple Silicon macOS. See the fork's Actions page
+for the current commit's results.
+
+The privileged PF test is separate from `make check`:
+
+```sh
+sudo python3 tests/macos_pf_test.py
+```
+
+It requires the active main ruleset's standard `com.apple/*` filter and rdr
+anchor hooks. It creates an isolated child anchor matching only root-originated
+TCP to `198.18.0.123:18080`, starts a local fake SOCKS5 proxy, and verifies both
+the original remote IP/port and bidirectional data. It never edits
+`/etc/pf.conf` or reloads the main ruleset. On exit it removes its own rules and
+releases only its own PF enable reference. Like other PF rules, an existing
+quick rule or `set skip on lo0` can prevent interception.
+
+The privileged test has not yet run because this development session cannot
+supply a sudo password. Until it passes on the target Mac, treat PF interception
+as experimental; passing the portable tests alone does not validate it.

@@ -17,9 +17,10 @@ port, not wholesale acceptance of every change on the contributors' branches.
 
 The selected changes are reconstructed/adapted from the reviewed diffs, with
 source attribution in commit messages. They are not literal cherry-picks or
-merges of the complete upstream PR branches. The curated fixes and macOS port
-are kept on separate local branches for review. Tests remain pending as
-described in [macos.md](macos.md#verification-status-of-this-change).
+merges of the complete upstream PR branches. The `curated-fixes` branch preserves the selected fixes before the macOS
+changes on `main`. The selected fixes pass the portable regression suite on Linux before the
+macOS changes, and the port passes it on macOS. See
+[macos.md](macos.md#verification) for coverage and the pending privileged PF test.
 
 ## Deferred or rejected from this baseline
 
