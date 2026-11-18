@@ -103,6 +103,8 @@ ifeq ($(DNSU2T),1)
 	$(PYTHON) tests/dns_test.py
 endif
 ifneq ($(findstring darwin,$(TARGET_TRIPLE)),)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I. tests/pf_helper_test.c pf-helper.c -o tests/pf_helper_test
+	./tests/pf_helper_test
 ifeq ($(REDUDP),1)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -I. tests/tun_test.c redudp-darwin.c -o tests/tun_test
 	./tests/tun_test
@@ -117,7 +119,7 @@ tags:
 	ctags -R
 
 clean:
-	$(RM) $(OUT) $(CONF) *.o *.d gen/*.o gen/*.d gen/version.c tests/prlimit-nofile tests/tun_test
+	$(RM) $(OUT) $(CONF) *.o *.d gen/*.o gen/*.d gen/version.c tests/prlimit-nofile tests/tun_test tests/pf_helper_test
 
 distclean: clean
 	$(RM) tags .depend

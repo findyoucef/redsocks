@@ -151,6 +151,17 @@ int red_socket_client(int type)
 		goto fail;
 	}
 
+#ifdef __APPLE__
+	if (type == SOCK_DGRAM) {
+		// Darwin's default UDP send buffer cannot hold a full IPv4 datagram.
+		int size = 65535;
+		if (setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &size, sizeof(size))) {
+			log_errno(LOG_ERR, "setsockopt(SO_SNDBUF)");
+			goto fail;
+		}
+	}
+#endif
+
 	if (type == SOCK_STREAM) {
 		if (apply_tcp_keepalive(fd))
 			goto fail;

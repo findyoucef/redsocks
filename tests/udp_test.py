@@ -40,6 +40,7 @@ class AssociateHandler(socketserver.BaseRequestHandler):
                 raise ValueError("expected UDP ASSOCIATE")
             receive(control, 6)
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as relay:
+                relay.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 131072)
                 relay.bind(("127.0.0.1", 0))
                 host = "0.0.0.0" if self.server.wildcard else "127.0.0.1"
                 control.sendall(b"\x05\x00\x00\x01" + socket.inet_aton(host)
@@ -115,6 +116,7 @@ def udp_redirector(server, destination=DESTINATION, backend="generic", extra="",
 
 def udp_client():
     client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    client.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 131072)
     client.bind(("127.0.0.1", 0))
     client.settimeout(3)
     return client
@@ -130,7 +132,7 @@ def exchange(client, endpoint, payload):
 class UDPTests(unittest.TestCase):
     def test_binary_empty_and_repeated_datagrams(self):
         with udp_proxy() as upstream, udp_redirector(upstream) as (port, _), udp_client() as client:
-            payloads = [b"", b"second", bytes(range(256)) * 32, b"last"]
+            payloads = [b"", b"second", bytes(range(256)) * 32, b"x" * 65497, b"last"]
             for payload in payloads:
                 exchange(client, ("127.0.0.1", port), payload)
             self.assertEqual(upstream.requests, [(DESTINATION, p) for p in payloads])

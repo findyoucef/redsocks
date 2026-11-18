@@ -61,6 +61,7 @@ def resolver(batch=1, disconnect=False, limit=16, timeout=2):
 '''
         try:
             with daemon(config), socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
+                client.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 131072)
                 client.settimeout(4)
                 client.connect(('127.0.0.1', port))
                 yield client, server
@@ -72,7 +73,7 @@ def resolver(batch=1, disconnect=False, limit=16, timeout=2):
 class DNSTests(unittest.TestCase):
     def test_pipelined_out_of_order_and_partial_frames(self):
         with resolver(batch=3) as (client, server):
-            packets = [query(i, 8000 if i == 2 else 0) for i in range(1, 4)]
+            packets = [query(i, 60000 if i == 2 else 0) for i in range(1, 4)]
             for packet in packets:
                 client.send(packet)
             self.assertEqual([client.recv(65535) for _ in packets], [response(p) for p in reversed(packets)])

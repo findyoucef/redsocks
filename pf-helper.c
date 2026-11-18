@@ -82,8 +82,15 @@ static void serve(int channel, int pf)
 			}
 			close(fd);
 		}
-		if (send(channel, &reply, sizeof(reply), 0) != sizeof(reply))
-			break;
+		size_t offset = 0;
+		while (offset < sizeof(reply)) {
+			ssize_t sent = send(channel, (char*)&reply + offset, sizeof(reply) - offset, 0);
+			if (sent < 0 && errno == EINTR)
+				continue;
+			if (sent <= 0)
+				_exit(0);
+			offset += sent;
+		}
 	}
 	_exit(0);
 }
@@ -91,7 +98,7 @@ static void serve(int channel, int pf)
 int pf_helper_start(int pf)
 {
 	int pair[2];
-	if (socketpair(AF_UNIX, SOCK_SEQPACKET, 0, pair))
+	if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair))
 		return -1;
 	int on = 1;
 	setsockopt(pair[0], SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof(on));
@@ -100,6 +107,7 @@ int pf_helper_start(int pf)
 	struct timeval timeout = {2, 0};
 	setsockopt(pair[0], SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 	setsockopt(pair[0], SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+	setsockopt(pair[1], SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
 	helper_pid = fork();
 	if (helper_pid == -1) {
 		int saved = errno;
@@ -137,8 +145,15 @@ int pf_helper_lookup(int channel, int connection, struct sockaddr_in *destinatio
 	if (sendmsg(channel, &msg, 0) != 1)
 		return -1;
 	struct lookup_reply reply;
-	ssize_t size;
-	do { size = recv(channel, &reply, sizeof(reply), 0); } while (size < 0 && errno == EINTR);
+	size_t size = 0;
+	while (size < sizeof(reply)) {
+		ssize_t received = recv(channel, (char*)&reply + size, sizeof(reply) - size, 0);
+		if (received < 0 && errno == EINTR)
+			continue;
+		if (received <= 0)
+			break;
+		size += received;
+	}
 	if (size != sizeof(reply)) {
 		/* A late response must never be mistaken for another connection. */
 		shutdown(channel, SHUT_RDWR);

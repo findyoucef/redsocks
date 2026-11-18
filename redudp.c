@@ -108,7 +108,7 @@ static int bound_udp4_get(const struct sockaddr_in *addr)
 
 	node->key = key;
 	node->ref = 1;
-	node->fd = socket(AF_INET, SOCK_DGRAM, 0);
+	node->fd = red_socket_client(SOCK_DGRAM);
 	if (node->fd == -1) {
 		log_errno(LOG_ERR, "socket");
 		goto fail;
@@ -371,7 +371,7 @@ static void redudp_read_assoc_reply(struct bufferevent *buffev, void *_arg)
 	if (reply.ip.addr == htonl(INADDR_ANY))
 		client->udprelayaddr.sin_addr = client->instance->config.relayaddr.sin_addr;
 
-	fd = socket(AF_INET, SOCK_DGRAM, 0);
+	fd = red_socket_client(SOCK_DGRAM);
 	if (fd == -1) {
 		redudp_log_errno(client, LOG_ERR, "socket");
 		goto fail;
@@ -830,7 +830,7 @@ static int redudp_init_instance(redudp_instance *instance)
 	} else
 #endif
 	{
-		fd = socket(AF_INET, SOCK_DGRAM, 0);
+		fd = red_socket_client(SOCK_DGRAM);
 		if (fd == -1) {
 			log_errno(LOG_ERR, "socket");
 			goto fail;
