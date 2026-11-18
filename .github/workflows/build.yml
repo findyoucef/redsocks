@@ -38,6 +38,7 @@ jobs:
           ./redsocks -t -c examples/redsocks-macos.conf
           ./redsocks -t -c examples/redsocks-macos-udp.conf
           ./redsocks -t -c examples/redsocks-macos-udp-fixed.conf
+          ./redsocks -t -c examples/redsocks-macos-dns.conf
       - name: PF forwarding on disposable macOS runner
         if: runner.os == 'macOS'
         run: |

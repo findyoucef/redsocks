@@ -63,7 +63,7 @@ def run(extra=""):
         with redirector(upstream, backend="pf", extra=extra) as (port, process):
             if extra:
                 uid = int(subprocess.check_output(["ps", "-o", "uid=", "-p", str(process.pid)], text=True))
-                assert uid == pwd.getpwnam("nobody").pw_uid, uid
+                assert uid & 0xffffffff == pwd.getpwnam("nobody").pw_uid & 0xffffffff, uid
             rules = (
                 f"rdr pass on lo0 inet proto tcp from any to {destination} port {target_port} "
                 f"-> 127.0.0.1 port {port}\n"
