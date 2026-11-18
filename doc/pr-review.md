@@ -20,7 +20,7 @@ source attribution in commit messages. They are not literal cherry-picks or
 merges of the complete upstream PR branches. The `curated-fixes` branch preserves the selected fixes before the macOS
 changes on `main`. The selected fixes pass the portable regression suite on Linux before the
 macOS changes, and the port passes it on macOS. See
-[macos.md](macos.md#verification) for coverage and the pending privileged PF test.
+[macos.md](macos.md#verification) for coverage and privileged PF test results.
 
 ## Deferred or rejected from this baseline
 

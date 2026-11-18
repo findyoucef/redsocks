@@ -139,6 +139,8 @@ the original remote IP/port and bidirectional data. It never edits
 releases only its own PF enable reference. Like other PF rules, an existing
 quick rule or `set skip on lo0` can prevent interception.
 
-The privileged test has not yet run because this development session cannot
-supply a sudo password. Until it passes on the target Mac, treat PF interception
-as experimental; passing the portable tests alone does not validate it.
+The privileged PF test passes on the Apple Silicon macOS CI runner. The user
+also confirmed its PASS result on the target Apple Silicon Mac running macOS
+26.7.3. These checks validate the IPv4 TCP path through SOCKS5, including the
+original destination IP and port. Other macOS releases and existing firewall
+configurations still require their own validation.
