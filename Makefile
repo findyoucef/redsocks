@@ -19,6 +19,7 @@ override CPPFLAGS += -D_DEFAULT_SOURCE -D_GNU_SOURCE
 
 ifneq ($(findstring darwin,$(TARGET_TRIPLE)),)
 override CPPFLAGS += -D_DARWIN_C_SOURCE
+OBJS += pf-helper.o
 # Homebrew is not necessarily on the compiler or pkg-config search paths.
 LIBEVENT_PREFIX ?= $(shell brew --prefix libevent 2>/dev/null)
 ifneq ($(LIBEVENT_PREFIX),)
@@ -33,10 +34,11 @@ ifneq ($(findstring linux,$(TARGET_TRIPLE)),)
 REDUDP ?= 1
 DNSU2T ?= 1
 else
-DNSU2T ?= 0
 ifneq ($(findstring darwin,$(TARGET_TRIPLE)),)
+DNSU2T ?= 1
 REDUDP ?= 1
 else
+DNSU2T ?= 0
 REDUDP ?= 0
 endif
 endif
@@ -52,8 +54,8 @@ OBJS += redudp-darwin.o
 endif
 endif
 ifeq ($(DNSU2T),1)
-ifeq ($(findstring linux,$(TARGET_TRIPLE)),)
-$(error DNSU2T=1 requires a Linux target)
+ifeq ($(findstring linux,$(TARGET_TRIPLE))$(findstring darwin,$(TARGET_TRIPLE)),)
+$(error DNSU2T=1 requires a Linux or macOS target)
 endif
 OBJS += dnsu2t.o
 override CPPFLAGS += -DUSE_DNSU2T
@@ -97,6 +99,15 @@ check: $(OUT)
 ifeq ($(REDUDP),1)
 	$(PYTHON) tests/udp_test.py
 endif
+ifeq ($(DNSU2T),1)
+	$(PYTHON) tests/dns_test.py
+endif
+ifneq ($(findstring darwin,$(TARGET_TRIPLE)),)
+ifeq ($(REDUDP),1)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I. tests/tun_test.c redudp-darwin.c -o tests/tun_test
+	./tests/tun_test
+endif
+endif
 
 install: $(OUT)
 	install -d $(DESTDIR)$(PREFIX)/sbin
@@ -106,7 +117,7 @@ tags:
 	ctags -R
 
 clean:
-	$(RM) $(OUT) $(CONF) *.o *.d gen/*.o gen/*.d gen/version.c tests/prlimit-nofile
+	$(RM) $(OUT) $(CONF) *.o *.d gen/*.o gen/*.d gen/version.c tests/prlimit-nofile tests/tun_test
 
 distclean: clean
 	$(RM) tags .depend

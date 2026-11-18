@@ -39,6 +39,7 @@
 # include <net/if.h>
 # ifdef __APPLE__
 #  include "pf-darwin.h"
+#  include "pf-helper.h"
 # else
 #  include <net/pfvar.h>
 # endif
@@ -168,15 +169,46 @@ static int getdestaddr_ipf(int fd, const struct sockaddr_in *client, const struc
 #endif
 
 #ifdef USE_PF
+#ifdef __APPLE__
+static int pf_channel = -1;
+#endif
+static void redir_fini_pf()
+{
+#ifdef __APPLE__
+	if (pf_channel != -1) {
+		pf_helper_stop(pf_channel);
+		pf_channel = -1;
+	}
+#endif
+	if (instance.redirector->private != -1)
+		redir_close_private();
+}
+
 static int redir_init_pf()
 {
-	return redir_open_private("/dev/pf", O_RDWR);
+	if (redir_open_private("/dev/pf", O_RDWR))
+		return -1;
+#ifdef __APPLE__
+	if (instance.user) {
+		pf_channel = pf_helper_start(instance.redirector->private);
+		if (pf_channel == -1) {
+			redir_close_private();
+			return -1;
+		}
+		redir_close_private();
+	}
+#endif
+	return 0;
 }
 
 static int getdestaddr_pf(
 		int fd, const struct sockaddr_in *client, const struct sockaddr_in *bindaddr,
 		struct sockaddr_in *destaddr)
 {
+#ifdef __APPLE__
+	if (pf_channel != -1)
+		return pf_helper_lookup(pf_channel, fd, destaddr);
+#endif
 	int pffd = instance.redirector->private;
 	struct pfioc_natlook nl;
 	int saved_errno;
@@ -301,7 +333,7 @@ static redirector_subsys redirector_subsystems[] =
 	{ .name = "ipf", .init = redir_init_ipf, .fini = redir_close_private, .getdestaddr = getdestaddr_ipf },
 #endif
 #ifdef USE_PF
-	{ .name = "pf",  .init = redir_init_pf,  .fini = redir_close_private, .getdestaddr = getdestaddr_pf },
+	{ .name = "pf",  .init = redir_init_pf,  .fini = redir_fini_pf, .getdestaddr = getdestaddr_pf },
 #endif
 #ifdef USE_IPTABLES
 	{ .name = "iptables", .getdestaddr = getdestaddr_iptables },
@@ -412,13 +444,7 @@ static int base_init()
 		uid = pw->pw_uid;
 	}
 
-#ifdef __APPLE__
-	/* Darwin checks the caller's UID on every PF ioctl, not just open(). */
-	if (instance.user && uid != 0 && strcmp(instance.redirector->name, "pf") == 0) {
-		log_error(LOG_ERR, "macOS PF lookups require root; remove `user` when using redirector = pf");
-		goto fail;
-	}
-#endif
+
 
 	if (instance.group) {
 		struct group *gr = getgrnam(instance.group);

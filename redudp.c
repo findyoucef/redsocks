@@ -672,7 +672,7 @@ static void redudp_pkt_from_client(int fd, short what, void *_arg)
 	assert(fd == event_get_fd(&self->listener));
 #ifdef __APPLE__
 	if (self->config.local_tun)
-		pktlen = redudp_read_tun(fd, buf, sizeof(buf), &clientaddr, &destaddr);
+		pktlen = redudp_read_tun(fd, &self->fragments, buf, sizeof(buf), &clientaddr, &destaddr);
 	else
 #endif
 	pktlen = red_recv_udp_pkt(fd, buf, sizeof(buf), &clientaddr, pdestaddr);
@@ -919,6 +919,9 @@ static void redudp_fini_instance(redudp_instance *instance)
 	free(instance->config.login);
 	free(instance->config.password);
 	free(instance->config.local_tun);
+#ifdef __APPLE__
+	redudp_free_fragments(&instance->fragments);
+#endif
 
 	memset(instance, 0, sizeof(*instance));
 	free(instance);

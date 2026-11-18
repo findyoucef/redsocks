@@ -23,7 +23,6 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <assert.h>
-#include <search.h>
 #include <errno.h>
 
 #include "list.h"
@@ -41,273 +40,123 @@
 
 static void dnsu2t_fini_instance(dnsu2t_instance *instance);
 static int dnsu2t_fini();
-static void dnsu2t_pkt_from_client(int fd, short what, void *_arg);
-static void dnsu2t_pkt_from_relay(int fd, short what, void *_arg);
-static void dnsu2t_relay_writable(int fd, short what, void *_arg);
 static void dnsu2t_close_relay(dnsu2t_instance *self);
 
-// this DNS query (IN SOA for `.`) acts as in-band DNS ping
-static const uint8_t dnsq_soa_root[] = {
-	0x00, 0x00, 0x01, 0x20,
-	0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x06, 0x00, 0x01};
-
 typedef struct inflight_req_t {
-	uint16_t id; // in network byte order
+	list_head list;
+	uint16_t id;
 	struct sockaddr_in clientaddr;
-
 } inflight_req;
-
-static int inflight_cmp(const void *a, const void *b)
-{
-	return memcmp(a, b, sizeof(uint16_t));
-}
-
-/***********************************************************************
- * Logic
- */
-static void dnsu2t_pkt_from_client(int srvfd, short what, void *_arg)
-{
-	dnsu2t_instance *self = _arg;
-	struct sockaddr_in clientaddr;
-	ssize_t pktlen;
-	dns_tcp_pkt in;
-
-	assert(srvfd == event_get_fd(&self->listener));
-	pktlen = red_recv_udp_pkt(srvfd, in.dns.raw, sizeof(in.dns.raw), &clientaddr, NULL);
-	if (pktlen == -1)
-		return;
-
-	if (pktlen <= sizeof(dns_header)) {
-		dnsu2t_log_error(LOG_NOTICE, "incomplete DNS request");
-		return;
-	}
-
-	if (pktlen > 0xffff
-		|| (in.dns.hdr.qr_opcode_aa_tc_rd & DNS_QR) != 0 /* not a query */
-		|| in.dns.hdr.qdcount == 0 /* no questions */
-		|| in.dns.hdr.ancount || in.dns.hdr.nscount /* some answers */
-	) {
-		dnsu2t_log_error(LOG_NOTICE, "malformed DNS request");
-		return;
-	}
-
-	inflight_req **preq = tfind(&in.dns.hdr.id, &self->inflight_root, inflight_cmp);
-	if (preq) {
-		// Technically, it's possible to re-number request and maintain matching
-		// for up to 65535 in-flight requests, but I'm a bit lazy for that.
-		assert((*preq)->id == in.dns.hdr.id);
-		if (memcmp(&(*preq)->clientaddr, &clientaddr, sizeof(clientaddr)) != 0) {
-			// that's not just re-transmission
-			char other_addr[RED_INET_ADDRSTRLEN];
-			dnsu2t_log_error(LOG_WARNING, "DNS request #%04x already in-flight from %s, renumbering not implemented",
-					ntohs(in.dns.hdr.id),
-					red_inet_ntop(&(*preq)->clientaddr, other_addr, sizeof(other_addr)));
-		}
-		return;
-	}
-
-	in.sz = htons((uint16_t)pktlen);
-	pktlen += sizeof(in.sz);
-
-	int fd = -1;
-	inflight_req *node = calloc(1, sizeof(inflight_req));
-	node->id = in.dns.hdr.id;
-	node->clientaddr = clientaddr;
-
-	int sent;
-	if (!event_initialized(&self->relay_rd)) {
-		fd = red_socket_client(SOCK_STREAM);
-		if (fd < 0)
-			goto fail;
-
-		event_set(&self->relay_rd, fd, EV_READ | EV_PERSIST, dnsu2t_pkt_from_relay, self);
-		event_set(&self->relay_wr, fd, EV_WRITE, dnsu2t_relay_writable, self);
-		fd = -1;
-
-		// The timeout on a persistent event resets whenever the event's callback runs.
-		const struct timeval relay_timeout = { .tv_sec = self->config.relay_timeout };
-		if (event_add(&self->relay_rd, &relay_timeout) != 0) {
-			dnsu2t_log_error(LOG_ERR, "event_add");
-			goto fail;
-		}
-		if (event_add(&self->relay_wr, &relay_timeout) != 0) {
-			dnsu2t_log_error(LOG_ERR, "event_add");
-			goto fail;
-		}
-
-		// MSG_FASTOPEN is available since Linux 3.6 released on 30 Sep 2012
-		sent = sendto(event_get_fd(&self->relay_rd), &in, pktlen, MSG_FASTOPEN,
-			(struct sockaddr*)&self->config.relayaddr, sizeof(self->config.relayaddr));
-		// Also, socket is not writable, right after MSG_FASTOPEN, so listener
-		// should be temporary disabled.
-		if (event_del(&self->listener))
-			dnsu2t_log_error(LOG_ERR, "event_del");
-	} else {
-		sent = write(event_get_fd(&self->relay_rd), &in, pktlen);
-	}
-
-	if (sent == pktlen || (sent == -1 && errno == EINPROGRESS)) {
-		self->request_count++;
-		self->inflight_count++;
-		if (self->inflight_count >= self->config.inflight_max) {
-			if (event_del(&self->listener))
-				dnsu2t_log_error(LOG_ERR, "event_del");
-		}
-		inflight_req **new = tsearch(node, &self->inflight_root, inflight_cmp);
-		if (!new)
-			abort(); // ultimate ENOMEM handler
-		assert(*new == node); // WAT?
-		node = NULL;
-		dnsu2t_log_error(LOG_DEBUG, "DNS request #%04x", ntohs(in.dns.hdr.id));
-
-	}
-	else if (sent == -1) {
-		dnsu2t_log_errno(LOG_DEBUG, "DNS request #%04x write()", ntohs(in.dns.hdr.id));
-		goto fail;
-	}
-	else if (sent != pktlen) {
-		dnsu2t_log_error(LOG_WARNING, "short write is not handled");
-		if (shutdown(fd, SHUT_WR) != 0)
-			dnsu2t_log_error(LOG_ERR, "shutdown");
-		// no more writes to broken stream, but that's not fatal failure
-		if (event_del(&self->listener))
-			dnsu2t_log_error(LOG_ERR, "event_del");
-		self->reqstream_broken = true;
-	}
-
-	return;
-
-fail:
-	if (fd != -1)
-		redsocks_close(fd);
-	if (node)
-		free(node);
-	dnsu2t_close_relay(self);
-}
-
-static void free_inflight_req(void *p)
-{
-	inflight_req *preq = p;
-	free(preq);
-}
 
 static void dnsu2t_close_relay(dnsu2t_instance *self)
 {
-	if (event_initialized(&self->relay_rd)) {
-		int fd = event_get_fd(&self->relay_rd);
-		assert(fd == event_get_fd(&self->relay_wr));
-		if (event_del(&self->relay_rd) == -1)
-			log_error(LOG_ERR, "event_del");
-		if (event_del(&self->relay_wr) == -1)
-			log_error(LOG_ERR, "event_del");
-		redsocks_close(fd);
-		memset(&self->relay_rd, 0, sizeof(self->relay_rd));
-		memset(&self->relay_wr, 0, sizeof(self->relay_wr));
-
-		// possibly `listener` is temporary disabled and we're in connection
-		// cleanup code path, so let's enable it back
-		if (!event_pending(&self->listener, EV_READ, NULL)) {
-			if (event_add(&self->listener, NULL) != 0) {
-				log_error(LOG_ERR, "event_del");
-			}
-		}
+	if (self->relay) {
+		redsocks_bufferevent_free(self->relay);
+		self->relay = NULL;
 	}
-	if (self->inflight_count) {
-		log_error(LOG_WARNING, "%d in-flight DNS request lost (%d served)", self->inflight_count, self->request_count - self->inflight_count);
+	inflight_req *req, *tmp;
+	list_for_each_entry_safe(req, tmp, &self->requests, list) {
+		list_del(&req->list);
+		free(req);
 	}
-	tdestroy(self->inflight_root, free_inflight_req);
-	self->inflight_root = NULL; // WTF?
 	self->inflight_count = 0;
-	self->request_count = 0;
-	self->reqstream_broken = false;
-	// assert(!!self->inflight_count == !!self->inflight_root);
+	if (event_initialized(&self->listener) && event_add(&self->listener, NULL))
+		log_errno(LOG_ERR, "event_add");
 }
 
-void dnsu2t_relay_writable(int fd, short what, void *_arg)
+static void dnsu2t_relay_error(struct bufferevent *bev, short what, void *arg)
 {
-	dnsu2t_instance *self = _arg;
-	assert(event_get_fd(&self->relay_wr) == fd);
-	if ((what & EV_WRITE) && self->inflight_count < self->config.inflight_max && !self->reqstream_broken) {
-		if (event_add(&self->listener, NULL) != 0)
+	dnsu2t_instance *self = arg;
+	log_error(LOG_DEBUG, "DNS TCP relay closed: " event_fmt_str, event_fmt(what));
+	dnsu2t_close_relay(self);
+}
+
+static void dnsu2t_relay_read(struct bufferevent *bev, void *arg)
+{
+	dnsu2t_instance *self = arg;
+	while (EVBUFFER_LENGTH(bev->input) >= 2) {
+		uint16_t size;
+		memcpy(&size, EVBUFFER_DATA(bev->input), sizeof(size));
+		size_t length = ntohs(size);
+		if (length <= sizeof(dns_header)) {
+			log_error(LOG_NOTICE, "malformed DNS TCP response");
+			dnsu2t_close_relay(self);
+			return;
+		}
+		if (EVBUFFER_LENGTH(bev->input) < length + 2)
+			return;
+		const unsigned char *packet = EVBUFFER_DATA(bev->input) + 2;
+		uint16_t id;
+		memcpy(&id, packet, sizeof(id));
+		inflight_req *req, *tmp;
+		list_for_each_entry_safe(req, tmp, &self->requests, list) {
+			if (req->id != id)
+				continue;
+			if (sendto(event_get_fd(&self->listener), packet, length, 0,
+			           (struct sockaddr*)&req->clientaddr, sizeof(req->clientaddr)) == -1)
+				log_errno(LOG_WARNING, "DNS UDP reply");
+			list_del(&req->list);
+			free(req);
+			self->inflight_count--;
+			break;
+		}
+		evbuffer_drain(bev->input, length + 2);
+		if (self->inflight_count < self->config.inflight_max && event_add(&self->listener, NULL))
 			log_errno(LOG_ERR, "event_add");
 	}
 }
 
-void dnsu2t_pkt_from_relay(int fd, short what, void *_arg)
+static void dnsu2t_relay_connected(struct bufferevent *bev, void *arg)
 {
-	dnsu2t_instance *self = _arg;
-	assert(event_get_fd(&self->relay_rd) == fd);
-
-	if (what & EV_READ) {
-		char* dst = ((char*)&self->pkt) + self->pkt_size;
-		if (self->pkt_size)
-			log_error(LOG_DEBUG, "partial packet, off=%lu", self->pkt_size);
-		const size_t bufsz = sizeof(self->pkt) - self->pkt_size;
-		assert(bufsz > 0 && self->pkt_size >= 0);
-		ssize_t rcvd = recv(fd, dst, bufsz, 0);
-		if (rcvd > 0) {
-			self->pkt_size += rcvd;
-			while (self->pkt_size >= sizeof(self->pkt.sz)) {
-				const ssize_t pktlen = ntohs(self->pkt.sz);
-				const ssize_t tcplen = pktlen + sizeof(self->pkt.sz);
-				if (pktlen <= sizeof(dns_header)) {
-					log_error(LOG_NOTICE, "malformed DNS reply");
-					dnsu2t_close_relay(self);
-					break;
-				}
-				else if (self->pkt_size >= tcplen) {
-					inflight_req **preq = tfind(&self->pkt.dns.hdr.id, &self->inflight_root, inflight_cmp);
-					if (preq) {
-						inflight_req *req = *preq;
-						assert(self->pkt.dns.hdr.id == req->id);
-						log_error(LOG_DEBUG, "DNS reply #%04x", ntohs(self->pkt.dns.hdr.id));
-						int sent = sendto(event_get_fd(&self->listener),
-							&self->pkt.dns, pktlen, 0,
-							(struct sockaddr*)&req->clientaddr, sizeof(req->clientaddr));
-						if (sent == -1) {
-							log_errno(LOG_WARNING, "sendto");
-						}
-						else if (sent != pktlen) {
-							log_errno(LOG_WARNING, "short sendto");
-						}
-						self->inflight_count--;
-						if (self->inflight_count < self->config.inflight_max && !self->reqstream_broken) {
-							if (event_add(&self->listener, NULL))
-								log_error(LOG_ERR, "event_del");
-						}
-						inflight_req* parent = tdelete(req, &self->inflight_root, inflight_cmp);
-						assert(parent);
-						free(req);
-					} else {
-						log_error(LOG_NOTICE, "DNS reply #%04x unexpected",
-								ntohs(self->pkt.dns.hdr.id));
-					}
-					if (self->pkt_size == tcplen) {
-						self->pkt_size = 0;
-					} else {
-						char* src = ((char*)&self->pkt) + tcplen;
-						self->pkt_size -= tcplen;
-						memmove(&self->pkt, src, self->pkt_size);
-					}
-				} else {
-					break; // nothing to consume so far
-				}
-			}
-		}
-		else if (rcvd == 0) {
-			log_error(LOG_DEBUG, "EOF from DNS server");
-			dnsu2t_close_relay(self);
-		}
-		else {
-			log_errno(LOG_DEBUG, "recv");
-			dnsu2t_close_relay(self);
-		}
-	}
-	if (what & EV_TIMEOUT) {
-		log_error(LOG_DEBUG, "TIMEOUT from DNS server");
+	dnsu2t_instance *self = arg;
+	if (!red_is_socket_connected_ok(bev)) {
 		dnsu2t_close_relay(self);
+		return;
 	}
+	bufferevent_setcb(bev, dnsu2t_relay_read, NULL, dnsu2t_relay_error, self);
+	bufferevent_enable(bev, EV_READ | EV_WRITE);
+}
+
+static void dnsu2t_pkt_from_client(int fd, short what, void *arg)
+{
+	dnsu2t_instance *self = arg;
+	struct sockaddr_in clientaddr;
+	dns_tcp_pkt packet;
+	ssize_t length = red_recv_udp_pkt(fd, packet.dns.raw, sizeof(packet.dns.raw), &clientaddr, NULL);
+	if (length <= (ssize_t)sizeof(dns_header))
+		return;
+	if ((packet.dns.hdr.qr_opcode_aa_tc_rd & DNS_QR) || !packet.dns.hdr.qdcount ||
+	    packet.dns.hdr.ancount || packet.dns.hdr.nscount)
+		return;
+	inflight_req *req;
+	list_for_each_entry(req, &self->requests, list) {
+		// Preserve the original duplicate-ID behavior: clients retry collisions.
+		if (req->id == packet.dns.hdr.id)
+			return;
+	}
+	req = calloc(1, sizeof(*req));
+	if (!req)
+		return;
+	if (!self->relay) {
+		self->relay = red_connect_relay(&self->config.relayaddr,
+			dnsu2t_relay_connected, dnsu2t_relay_error, self);
+		if (!self->relay) {
+			free(req);
+			return;
+		}
+		bufferevent_settimeout(self->relay, self->config.relay_timeout, self->config.relay_timeout);
+	}
+	packet.sz = htons((uint16_t)length);
+	if (bufferevent_write(self->relay, &packet, length + sizeof(packet.sz))) {
+		free(req);
+		dnsu2t_close_relay(self);
+		return;
+	}
+	req->id = packet.dns.hdr.id;
+	req->clientaddr = clientaddr;
+	list_add_tail(&req->list, &self->requests);
+	if (++self->inflight_count >= self->config.inflight_max && event_del(&self->listener))
+		log_errno(LOG_ERR, "event_del");
 }
 
 /***********************************************************************
@@ -335,11 +184,12 @@ static int dnsu2t_onenter(parser_section *section)
 	}
 
 	INIT_LIST_HEAD(&instance->list);
+	INIT_LIST_HEAD(&instance->requests);
 	instance->config.bindaddr.sin_family = AF_INET;
 	instance->config.bindaddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-	instance->config.bindaddr.sin_port = htons(53);;
+	instance->config.bindaddr.sin_port = 53;
 	instance->config.relayaddr.sin_family = AF_INET;
-	instance->config.relayaddr.sin_port = htons(53);
+	instance->config.relayaddr.sin_port = 53;
 	instance->config.relay_timeout = 30;
 	instance->config.inflight_max = 16;
 
@@ -367,6 +217,11 @@ static int dnsu2t_onexit(parser_section *section)
 	instance->config.bindaddr.sin_port = htons(instance->config.bindaddr.sin_port);
 	instance->config.relayaddr.sin_port = htons(instance->config.relayaddr.sin_port);
 
+	if (!instance->config.inflight_max || !instance->config.relay_timeout) {
+		parser_error(section->context, "inflight_max and remote_timeout must be positive");
+		free(instance);
+		return -1;
+	}
 	list_add(&instance->list, &instances);
 
 	return 0;
@@ -382,6 +237,7 @@ static int dnsu2t_init_instance(dnsu2t_instance *instance)
 	}
 
 	event_set(&instance->listener, fd, EV_READ | EV_PERSIST, dnsu2t_pkt_from_client, instance);
+	fd = -1;
 	error = event_add(&instance->listener, NULL);
 	if (error) {
 		log_errno(LOG_ERR, "event_add");

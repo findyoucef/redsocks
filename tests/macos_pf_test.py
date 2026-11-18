@@ -12,6 +12,7 @@ import re
 import socket
 import subprocess
 import sys
+import pwd
 
 from native_test import proxy, receive, redirector
 
@@ -54,12 +55,15 @@ def pf_anchor(rules):
             pfctl("-X", token)
 
 
-def main():
+def run(extra=""):
     require_pf()
     destination = "198.18.0.123"
     target_port = 18080
     with proxy("socks5", destination=destination, destination_port=target_port) as upstream:
-        with redirector(upstream, backend="pf") as (port, _):
+        with redirector(upstream, backend="pf", extra=extra) as (port, process):
+            if extra:
+                uid = int(subprocess.check_output(["ps", "-o", "uid=", "-p", str(process.pid)], text=True))
+                assert uid == pwd.getpwnam("nobody").pw_uid, uid
             rules = (
                 f"rdr pass on lo0 inet proto tcp from any to {destination} port {target_port} "
                 f"-> 127.0.0.1 port {port}\n"
@@ -76,4 +80,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run()
+    run('user = "nobody"; group = "nobody";')

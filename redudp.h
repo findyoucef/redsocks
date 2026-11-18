@@ -19,6 +19,9 @@ typedef struct redudp_instance_t {
 	redudp_config   config;
 	struct event    listener;
 	list_head       clients;
+#ifdef __APPLE__
+	struct redudp_fragments *fragments;
+#endif
 } redudp_instance;
 
 typedef struct redudp_client_t {

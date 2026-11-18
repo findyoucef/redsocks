@@ -37,16 +37,9 @@ typedef struct dnsu2t_instance_t {
 	dnsu2t_config      config;
 	struct event       listener;
 
-	struct event       relay_rd;
-	struct event       relay_wr;
-
-	bool               reqstream_broken;
-	int                request_count;
+	struct bufferevent *relay;
+	list_head          requests;
 	int                inflight_count;
-	void*              inflight_root;
-
-	ssize_t            pkt_size;
-	dns_tcp_pkt        pkt;
 } dnsu2t_instance;
 
 /* vim:set tabstop=4 softtabstop=4 shiftwidth=4: */

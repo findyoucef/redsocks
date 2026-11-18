@@ -9,3 +9,5 @@ redsocks
 /tests/__pycache__/
 
 /redsocks-curated.bundle
+
+/tests/tun_test

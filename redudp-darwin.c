@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <time.h>
 
 #include "utils.h"
 #include "redudp-darwin.h"
@@ -83,7 +84,101 @@ static void write16(uint8_t *p, uint16_t value)
 	p[1] = value & 0xff;
 }
 
-ssize_t redudp_read_tun(int fd, void *data, size_t capacity,
+/* Bound each interface to 32 incomplete datagrams (about 2.4 MiB), with
+ * a fixed lifetime. Conflicting overlaps poison the ID until it expires. */
+struct redudp_fragments {
+	struct redudp_fragments *next;
+	struct timespec created;
+	uint8_t key[10]; /* source, destination, IPv4 ID; protocol is always UDP */
+	uint8_t data[65515];
+	uint8_t present[8192];
+	size_t count, end, highest;
+	int poisoned;
+};
+
+void redudp_free_fragments(struct redudp_fragments **head)
+{
+	while (*head) {
+		struct redudp_fragments *next = (*head)->next;
+		free(*head);
+		*head = next;
+	}
+}
+
+static ssize_t reassemble(struct redudp_fragments **head, const uint8_t *ip,
+	size_t header, size_t total, uint8_t *output)
+{
+	struct timespec now;
+	if (clock_gettime(CLOCK_MONOTONIC, &now))
+		return -1;
+	uint8_t key[10];
+	memcpy(key, ip + 12, 8);
+	memcpy(key + 8, ip + 4, 2);
+	struct redudp_fragments **cursor = head, *entry = NULL;
+	size_t entries = 0;
+	while (*cursor) {
+		struct redudp_fragments *item = *cursor;
+		if (now.tv_sec - item->created.tv_sec >= 30) {
+			*cursor = item->next;
+			free(item);
+			continue;
+		}
+		if (memcmp(item->key, key, sizeof(key)) == 0)
+			entry = item;
+		entries++;
+		cursor = &item->next;
+	}
+	size_t offset = (read16(ip + 6) & 0x1fff) * 8;
+	size_t length = total - header;
+	int more = read16(ip + 6) & 0x2000;
+	if (!length || offset + length > 65515 || (more && length % 8))
+		return -1;
+	if (!entry) {
+		if (entries >= 32)
+			return -1;
+		entry = calloc(1, sizeof(*entry));
+		if (!entry)
+			return -1;
+		memcpy(entry->key, key, sizeof(key));
+		entry->created = now;
+		entry->next = *head;
+		*head = entry;
+	}
+	if (entry->poisoned)
+		return -1;
+	if ((entry->end && (offset + length > entry->end || (!more && offset + length != entry->end))) ||
+	    (!more && offset + length < entry->highest))
+		goto conflict;
+	if (!more)
+		entry->end = offset + length;
+	if (offset + length > entry->highest)
+		entry->highest = offset + length;
+	for (size_t i = 0; i < length; i++) {
+		size_t pos = offset + i;
+		uint8_t bit = 1u << (pos % 8);
+		if (entry->present[pos / 8] & bit) {
+			if (entry->data[pos] != ip[header + i])
+				goto conflict;
+		} else {
+			entry->present[pos / 8] |= bit;
+			entry->data[pos] = ip[header + i];
+			entry->count++;
+		}
+	}
+	if (!entry->end || entry->count != entry->end)
+		return -1;
+	size_t result = entry->end;
+	memcpy(output, entry->data, result);
+	for (cursor = head; *cursor != entry; cursor = &(*cursor)->next) {}
+	*cursor = entry->next;
+	free(entry);
+	return result;
+conflict:
+	entry->poisoned = 1;
+	return -1;
+}
+
+ssize_t redudp_read_tun(int fd, struct redudp_fragments **fragments, void *data, size_t capacity,
 	struct sockaddr_in *client, struct sockaddr_in *destination)
 {
 	uint8_t packet[4 + 65535];
@@ -98,12 +193,23 @@ ssize_t redudp_read_tun(int fd, void *data, size_t capacity,
 	size_t header = (ip[0] & 15) * 4;
 	size_t total = read16(ip + 2);
 	if (ntohl(family) != AF_INET || (ip[0] >> 4) != 4 || header < 20 ||
-	    total < header + 8 || total > (size_t)received - 4 ||
-	    ip[9] != IPPROTO_UDP || (read16(ip + 6) & 0x3fff))
+	    total < header || total > (size_t)received - 4 ||
+	    ip[9] != IPPROTO_UDP)
 		goto malformed;
+	uint8_t assembled[65515];
 	const uint8_t *udp = ip + header;
+	size_t udp_size = total - header;
+	if (read16(ip + 6) & 0x3fff) {
+		ssize_t size = reassemble(fragments, ip, header, total, assembled);
+		if (size < 0)
+			goto malformed;
+		udp = assembled;
+		udp_size = size;
+	}
+	if (udp_size < 8)
+		goto malformed;
 	size_t length = read16(udp + 4);
-	if (length < 8 || length != total - header || length - 8 > capacity)
+	if (length < 8 || length != udp_size || length - 8 > capacity)
 		goto malformed;
 	memset(client, 0, sizeof(*client));
 	memset(destination, 0, sizeof(*destination));

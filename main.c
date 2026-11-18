@@ -45,7 +45,6 @@ app_subsys *subsystems[] = {
 #ifdef DBG_BUILD
 	&debug_subsys,
 #endif
-	&base_subsys,
 #ifdef USE_REDUDP
 	&redudp_subsys,
 #endif
@@ -53,6 +52,7 @@ app_subsys *subsystems[] = {
 #ifdef USE_DNSU2T
 	&dnsu2t_subsys,
 #endif
+	&base_subsys, // Bind listeners and open utun before dropping privileges.
 };
 
 static const char *confname = "redsocks.conf";
