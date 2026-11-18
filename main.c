@@ -87,6 +87,9 @@ int main(int argc, char **argv)
 				       "  Headers: %8x\n"
 				       "  Runtime: %8x\n", LIBEVENT_VERSION_NUMBER, event_get_version_number());
 			}
+#ifdef USE_SPLICE
+			puts("Built with splice(2) support");
+#endif
 			return EXIT_SUCCESS;
 		default:
 			printf(

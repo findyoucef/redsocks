@@ -48,7 +48,9 @@ enum pump_state_t {
 
 static const char *redsocks_event_str(unsigned short what);
 static int redsocks_start_bufferpump(redsocks_client *client);
+#ifdef USE_SPLICE
 static int redsocks_start_splicepump(redsocks_client *client);
+#endif
 
 static void redsocks_conn_list_del(redsocks_client *client);
 
@@ -89,6 +91,7 @@ static parser_entry redsocks_entries[] =
 
 static bool is_splice_good()
 {
+#ifdef USE_SPLICE
 	struct utsname u;
 	if (uname(&u) != 0) {
 		return false;
@@ -107,6 +110,9 @@ static bool is_splice_good()
 	       (v[0] == 2 && v[1] > 6) ||
 	       (v[0] == 2 && v[1] == 6 && v[2] > 27) ||
 	       (v[0] == 2 && v[1] == 6 && v[2] == 27 && v[3] >= 13);
+#else
+	return false;
+#endif
 }
 
 static int redsocks_onenter(parser_section *section)
@@ -336,7 +342,11 @@ void redsocks_start_relay(redsocks_client *client)
 
 	client->state = pump_active;
 
+#ifdef USE_SPLICE
 	int error = ((client->instance->config.use_splice) ? redsocks_start_splicepump : redsocks_start_bufferpump)(client);
+#else
+	int error = redsocks_start_bufferpump(client);
+#endif
 	if (!error)
 		redsocks_log_error(client, LOG_DEBUG, "data relaying started");
 	else
@@ -363,6 +373,7 @@ static int redsocks_start_bufferpump(redsocks_client *client)
 	return error;
 }
 
+#ifdef USE_SPLICE
 static int pipeprio(redsocks_pump *pump, int fd)
 {
 	// client errors are logged with LOG_INFO, server errors with LOG_NOTICE
@@ -657,6 +668,8 @@ static int redsocks_start_splicepump(redsocks_client *client)
 
 	return 0;
 }
+
+#endif /* USE_SPLICE */
 
 static bool has_loopback_destination(redsocks_client *client)
 {
@@ -1390,6 +1403,11 @@ static int redsocks_init_instance(redsocks_instance *instance)
 	if (error) {
 		log_errno(LOG_ERR, "event_add");
 		goto fail;
+	}
+
+	if (instance->config.use_splice && !is_splice_good()) {
+		log_error(LOG_WARNING, "splice(2) requested but unavailable; using buffer pump");
+		instance->config.use_splice = false;
 	}
 
 	if (instance->relay_ss->instance_init)

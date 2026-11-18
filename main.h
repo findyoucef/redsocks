@@ -1,7 +1,12 @@
 #ifndef MAIN_H_TUE_JAN_23_15_38_25_2007
 #define MAIN_H_TUE_JAN_23_15_38_25_2007
 
+#include <fcntl.h>
 #include "parser.h"
+
+#if defined(__linux__) && defined(SPLICE_F_MOVE)
+#define USE_SPLICE
+#endif
 
 struct event_base;
 
