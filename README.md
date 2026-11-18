@@ -48,8 +48,9 @@ When is redsocks probably a wrong tool?
   That may require some code doing [TCP Reassembly](https://wiki.wireshark.org/TCP_Reassembly)
   like [`tun2socks`](https://github.com/ambrop72/badvpn/wiki/Tun2socks).
 
-Linux/iptables is supported. This fork includes an experimental macOS/PF
-IPv4 TCP port; see [macOS build and setup](doc/macos.md) for its verification
+Linux/iptables is supported. This fork includes an experimental macOS IPv4 port
+with PF for TCP and fixed-destination UDP, and utun for general UDP. See
+[macOS build and setup](doc/macos.md) for its verification
 status and limitations, and [upstream PR decisions](doc/pr-review.md).
 OpenBSD/pf and FreeBSD/ipfw may work with some hacks. The author has no permanent root access to machines running OpenBSD,
 FreeBSD and MacOSX to test and develop for these platforms.
@@ -166,7 +167,7 @@ Compilation is as easy as running `make`, there is no `./configure` magic.
 
 GNU Make works, other implementations of make were not tested.
 
-Run `make check` for the portable TCP regression tests (Python 3). The original
+Run `make check` for the portable TCP and UDP regression tests (Python 3). The original
 `make test` integration suite requires a Linux host and its legacy dependencies.
 
 ## Running

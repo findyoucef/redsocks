@@ -32,9 +32,12 @@ jobs:
         run: make -j2 CC=${{ matrix.cc }}
       - name: TCP and UDP regression tests
         run: make check CC=${{ matrix.cc }}
-      - name: macOS sample configuration
+      - name: macOS sample configurations
         if: runner.os == 'macOS'
-        run: ./redsocks -t -c examples/redsocks-macos.conf
+        run: |
+          ./redsocks -t -c examples/redsocks-macos.conf
+          ./redsocks -t -c examples/redsocks-macos-udp.conf
+          ./redsocks -t -c examples/redsocks-macos-udp-fixed.conf
       - name: PF forwarding on disposable macOS runner
         if: runner.os == 'macOS'
         run: |

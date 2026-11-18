@@ -38,6 +38,7 @@ def tunnel_rules(name):
 class PFUDPTests(unittest.TestCase):
     def test_fixed_destination(self):
         destination = ("198.18.0.123", 18080)
+        subprocess.run(["/sbin/pfctl", "-nf", "examples/pf-macos-udp-fixed.anchor"], check=True)
         with udp_proxy(auth=True) as upstream, udp_redirector(upstream, destination, "pf") as (port, _):
             with pf_anchor(rules(port)), client() as app:
                 app.connect(destination)
@@ -77,6 +78,7 @@ class PFUDPTests(unittest.TestCase):
         target = ("198.18.0.123", 18080)
         with udp_proxy(auth=True, wildcard=True) as upstream, udp_redirector(upstream, None, local_tun="utun100"):
             configure_tun("utun100")
+            subprocess.run(["/sbin/pfctl", "-nf", "examples/pf-macos-udp.anchor"], check=True)
             with pf_anchor(tunnel_rules("utun100")), client() as app:
                 app.connect(target)
                 for payload in [b"", bytes(range(256)) * 32]:

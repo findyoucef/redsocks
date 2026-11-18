@@ -23,9 +23,13 @@
 
 int redudp_open_tun(const char *name)
 {
+	if (strncmp(name, "utun", 4) != 0 || !name[4]) {
+		errno = EINVAL;
+		return -1;
+	}
 	char *end;
 	errno = 0;
-	unsigned long unit = strtoul(name + (strlen(name) >= 4 ? 4 : 0), &end, 10);
+	unsigned long unit = strtoul(name + 4, &end, 10);
 	char canonical[IFNAMSIZ];
 	snprintf(canonical, sizeof(canonical), "utun%lu", unit);
 	if (errno || unit >= UINT32_MAX || *end || strcmp(name, canonical) != 0) {

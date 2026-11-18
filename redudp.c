@@ -836,8 +836,8 @@ static int redudp_init_instance(redudp_instance *instance)
 			goto fail;
 		}
 
-		if (do_tproxy(instance)) {
 #ifdef __linux__
+		if (do_tproxy(instance)) {
 			int on = 1;
 			char buf[RED_INET_ADDRSTRLEN];
 			// iptables TPROXY target does not send packets to non-transparent sockets
@@ -851,9 +851,9 @@ static int redudp_init_instance(redudp_instance *instance)
 			}
 
 			log_error(LOG_DEBUG, "redudp @ %s: TPROXY", red_inet_ntop(&instance->config.bindaddr, buf, sizeof(buf)));
+		} else
 #endif
-		}
-		else {
+		{
 			char buf1[RED_INET_ADDRSTRLEN], buf2[RED_INET_ADDRSTRLEN];
 			log_error(LOG_DEBUG, "redudp @ %s: destaddr=%s",
 				red_inet_ntop(&instance->config.bindaddr, buf1, sizeof(buf1)),
@@ -874,6 +874,7 @@ static int redudp_init_instance(redudp_instance *instance)
 	}
 
 	event_set(&instance->listener, fd, EV_READ | EV_PERSIST, redudp_pkt_from_client, instance);
+	fd = -1; // ownership belongs to instance->listener now
 	error = event_add(&instance->listener, NULL);
 	if (error) {
 		log_errno(LOG_ERR, "event_add");

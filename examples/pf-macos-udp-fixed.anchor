@@ -1,0 +1,6 @@
+# Replace 501 with the output of `id -u` for the user to capture.
+capture_user = "501"
+
+# Keep the destination and listener port in sync with redsocks-macos-udp-fixed.conf.
+rdr pass on lo0 inet proto udp from any to 1.1.1.1 port 53 -> 127.0.0.1 port 12346
+pass out route-to (lo0 127.0.0.1) inet proto udp from any to 1.1.1.1 port 53 user $capture_user

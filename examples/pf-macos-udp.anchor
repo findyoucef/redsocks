@@ -1,0 +1,11 @@
+# Replace 501 with the output of `id -u` for the user to capture.
+capture_user = "501"
+
+# Replace 203.0.113.10 with the real upstream proxy IP. Add direct destinations.
+table <redudp_bypass> const { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, \
+    127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, \
+    198.18.0.0/15, 224.0.0.0/4, 240.0.0.0/4, 203.0.113.10 }
+
+# Start redsocks, then configure utun100 as described in doc/macos.md.
+# Route the original packet to utun; do not apply rdr to these UDP packets.
+pass out route-to (utun100 198.18.255.2) inet proto udp from any to ! <redudp_bypass> user $capture_user
