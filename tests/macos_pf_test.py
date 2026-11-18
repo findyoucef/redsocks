@@ -36,7 +36,7 @@ def main():
     token = None
     try:
         with proxy("socks5", destination=destination, destination_port=target_port) as upstream:
-            with redirector(upstream, "user = nobody; group = nobody;", "pf") as (port, _):
+            with redirector(upstream, backend="pf") as (port, _):
                 rules = (
                     f"rdr pass on lo0 inet proto tcp from any to {destination} port {target_port} "
                     f"-> 127.0.0.1 port {port}\n"

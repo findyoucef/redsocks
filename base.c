@@ -412,6 +412,14 @@ static int base_init()
 		uid = pw->pw_uid;
 	}
 
+#ifdef __APPLE__
+	/* Darwin checks the caller's UID on every PF ioctl, not just open(). */
+	if (instance.user && uid != 0 && strcmp(instance.redirector->name, "pf") == 0) {
+		log_error(LOG_ERR, "macOS PF lookups require root; remove `user` when using redirector = pf");
+		goto fail;
+	}
+#endif
+
 	if (instance.group) {
 		struct group *gr = getgrnam(instance.group);
 		if (gr == NULL) {
