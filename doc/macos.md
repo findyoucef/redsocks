@@ -139,8 +139,9 @@ the original remote IP/port and bidirectional data. It never edits
 releases only its own PF enable reference. Like other PF rules, an existing
 quick rule or `set skip on lo0` can prevent interception.
 
-The privileged PF test passes on the Apple Silicon macOS CI runner. The user
-also confirmed its PASS result on the target Apple Silicon Mac running macOS
+The privileged PF test passes on both Intel and Apple Silicon macOS CI
+runners. The user also confirmed its PASS result on the target Apple Silicon
+Mac running macOS
 26.7.3. These checks validate the IPv4 TCP path through SOCKS5, including the
 original destination IP and port. Other macOS releases and existing firewall
 configurations still require their own validation.
