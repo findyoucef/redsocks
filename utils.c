@@ -53,6 +53,7 @@ int red_recv_udp_pkt(int fd, char *buf, size_t buflen, struct sockaddr_in *inadd
 	}
 
 	if (toaddr) {
+#ifdef __linux__
 		memset(toaddr, 0, sizeof(*toaddr));
 		for (struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg); cmsg; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
 			if (
@@ -74,6 +75,10 @@ int red_recv_udp_pkt(int fd, char *buf, size_t buflen, struct sockaddr_in *inadd
 			log_error(LOG_WARNING, "(SOL_IP, IP_ORIGDSTADDR) not found");
 			return -1;
 		}
+#else
+		log_error(LOG_WARNING, "transparent UDP destination lookup requires Linux");
+		return -1;
+#endif
 	}
 
 	if (addrlen != sizeof(*inaddr)) {

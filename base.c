@@ -18,6 +18,9 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#if defined(__APPLE__) && !defined(TCP_KEEPIDLE)
+#define TCP_KEEPIDLE TCP_KEEPALIVE
+#endif
 #include <arpa/inet.h>
 #include <sys/stat.h>
 #include <sys/resource.h>
@@ -34,7 +37,11 @@
 #endif
 #if defined USE_PF
 # include <net/if.h>
-# include <net/pfvar.h>
+# ifdef __APPLE__
+#  include "pf-darwin.h"
+# else
+#  include <net/pfvar.h>
+# endif
 # include <sys/ioctl.h>
 # include <errno.h>
 #endif
@@ -195,6 +202,10 @@ static int getdestaddr_pf(
 			goto fail;
 		}
 	}
+	memset(destaddr, 0, sizeof(*destaddr));
+#ifdef __APPLE__
+	destaddr->sin_len = sizeof(*destaddr);
+#endif
 	destaddr->sin_family = AF_INET;
 	destaddr->sin_port = nl.rdport;
 	destaddr->sin_addr = nl.rdaddr.v4;

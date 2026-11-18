@@ -1,6 +1,8 @@
 #ifndef UUID_67C91670_FCCB_4855_BDF7_609F1EECB8B4
 #define UUID_67C91670_FCCB_4855_BDF7_609F1EECB8B4
 
+#ifdef __linux__
+
 /* all these definitions, are included into bits/in.h from libc6-dev 2.15-0ubuntu10
  * from Ubuntu 12.04 and is not included into libc6-dev 2.11.1-0ubuntu7.10 from
  * Ubuntu 10.04.
@@ -21,5 +23,7 @@
 #   warning Using hardcoded value for IP_TRANSPARENT as libc headers do not define it.
 #   define IP_TRANSPARENT 19
 #endif
+
+#endif /* __linux__ */
 
 #endif // 67C91670_FCCB_4855_BDF7_609F1EECB8B4

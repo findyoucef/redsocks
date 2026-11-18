@@ -32,7 +32,9 @@
 extern app_subsys redsocks_subsys;
 extern app_subsys debug_subsys;
 extern app_subsys base_subsys;
+#ifdef USE_REDUDP
 extern app_subsys redudp_subsys;
+#endif
 extern app_subsys dnstc_subsys;
 extern app_subsys dnsu2t_subsys;
 
@@ -42,7 +44,9 @@ app_subsys *subsystems[] = {
 	&debug_subsys,
 #endif
 	&base_subsys,
+#ifdef USE_REDUDP
 	&redudp_subsys,
+#endif
 	&dnstc_subsys,
 	&dnsu2t_subsys,
 };

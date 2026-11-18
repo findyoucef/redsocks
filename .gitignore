@@ -4,3 +4,8 @@ tags
 redsocks
 .depend
 /gen
+
+*.d
+/tests/__pycache__/
+
+/redsocks-curated.bundle
