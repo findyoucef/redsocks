@@ -44,6 +44,8 @@ jobs:
           sudo /sbin/pfctl -f /etc/pf.conf
           sudo python3 tests/macos_pf_test.py
           sudo python3 tests/macos_udp_test.py
+      - name: TCP forwarding benchmark
+        run: python3 tests/benchmark.py
       - name: Debug build
         run: |
           make clean

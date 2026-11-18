@@ -65,6 +65,16 @@ class PFUDPTests(unittest.TestCase):
                     self.assertEqual(observed, expected)
             self.assertEqual(upstream.associations, len(destinations))
 
+    def test_fragmented_tunnel_after_privilege_drop(self):
+        target = ("198.18.0.123", 18080)
+        with udp_proxy() as upstream, udp_redirector(upstream, None, local_tun="utun100",
+                base_extra='user = "nobody"; group = "nobody";'):
+            configure_tun("utun100")
+            subprocess.run(["/sbin/ifconfig", "utun100", "mtu", "600"], check=True)
+            with pf_anchor(tunnel_rules("utun100")), client() as app:
+                exchange(app, target, bytes(range(256)) * 32)
+            self.assertEqual(upstream.associations, 1)
+
     def test_two_clients(self):
         target = ("198.18.0.123", 18080)
         with udp_proxy() as upstream, udp_redirector(upstream, None, local_tun="utun100"):

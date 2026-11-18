@@ -11,3 +11,4 @@ redsocks
 /redsocks-curated.bundle
 
 /tests/tun_test
+*.dSYM/

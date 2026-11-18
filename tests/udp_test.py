@@ -96,7 +96,7 @@ def udp_proxy(auth=False, wildcard=False, malformed=False):
 
 
 @contextlib.contextmanager
-def udp_redirector(server, destination=DESTINATION, backend="generic", extra="", local_tun=None):
+def udp_redirector(server, destination=DESTINATION, backend="generic", extra="", local_tun=None, base_extra=""):
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as reservation:
         reservation.bind(("127.0.0.1", 0))
         port = 0 if local_tun else reservation.getsockname()[1]
@@ -104,7 +104,7 @@ def udp_redirector(server, destination=DESTINATION, backend="generic", extra="",
               if destination else "")
     credentials = 'login = "user"; password = "pass";' if server.auth else ""
     interface = f'local_tun = "{local_tun}";' if local_tun else ""
-    config = f"""base {{ log = stderr; log_info = on; daemon = off; redirector = {backend}; }}
+    config = f"""base {{ log = stderr; log_info = on; daemon = off; redirector = {backend}; {base_extra} }}
         redudp {{ local_ip = 127.0.0.1; local_port = {port};
         ip = 127.0.0.1; port = {server.server_address[1]};
         {target} {credentials} {extra} {interface} }}
