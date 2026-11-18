@@ -1007,7 +1007,7 @@ static struct timeval drop_idle_connections()
 		list_for_each_entry_safe(client, tmp, &instance->clients, list) {
 			struct timeval idle;
 			timersub(&now, &client->last_event, &idle);
-			if (timercmp(&idle, &zero, <=) || timercmp(&max_idle, &idle, <=)) {
+			if (timercmp(&idle, &zero, <) || timercmp(&max_idle, &idle, <=)) {
 				redsocks_drop_client(client);
 				best_next = zero;
 			} else {

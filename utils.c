@@ -33,7 +33,7 @@ int red_recv_udp_pkt(int fd, char *buf, size_t buflen, struct sockaddr_in *inadd
 	ssize_t pktlen;
 	struct msghdr msg;
 	struct iovec io;
-	char control[1024];
+	union { struct cmsghdr align; char data[1024]; } control;
 
 	memset(inaddr, 0, sizeof(*inaddr));
 	memset(&msg, 0, sizeof(msg));
@@ -41,7 +41,7 @@ int red_recv_udp_pkt(int fd, char *buf, size_t buflen, struct sockaddr_in *inadd
 	msg.msg_namelen = sizeof(*inaddr);
 	msg.msg_iov = &io;
 	msg.msg_iovlen = 1;
-	msg.msg_control = control;
+	msg.msg_control = control.data;
 	msg.msg_controllen = sizeof(control);
 	io.iov_base = buf;
 	io.iov_len = buflen;
@@ -49,6 +49,16 @@ int red_recv_udp_pkt(int fd, char *buf, size_t buflen, struct sockaddr_in *inadd
 	pktlen = recvmsg(fd, &msg, 0);
 	if (pktlen == -1) {
 		log_errno(LOG_WARNING, "recvfrom");
+		return -1;
+	}
+
+	if (msg.msg_namelen != sizeof(*inaddr)) {
+		log_error(LOG_WARNING, "unexpected address length %u instead of %zu", msg.msg_namelen, sizeof(*inaddr));
+		return -1;
+	}
+
+	if (toaddr && (msg.msg_flags & MSG_CTRUNC)) {
+		log_error(LOG_WARNING, "truncated UDP destination metadata");
 		return -1;
 	}
 
@@ -91,11 +101,6 @@ int red_recv_udp_pkt(int fd, char *buf, size_t buflen, struct sockaddr_in *inadd
 		log_error(LOG_WARNING, "transparent UDP destination lookup is unavailable");
 		return -1;
 #endif
-	}
-
-	if (msg.msg_namelen != sizeof(*inaddr)) {
-		log_error(LOG_WARNING, "unexpected address length %u instead of %zu", msg.msg_namelen, sizeof(*inaddr));
-		return -1;
 	}
 
 	if ((msg.msg_flags & MSG_TRUNC) || pktlen > buflen) {

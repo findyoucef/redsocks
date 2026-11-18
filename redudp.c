@@ -249,7 +249,7 @@ static void redudp_drop_client(redudp_client *client)
 	free(client);
 }
 
-static void redudp_bump_timeout(redudp_client *client)
+static int redudp_bump_timeout(redudp_client *client)
 {
 	struct timeval tv;
 	tv.tv_sec = client->instance->config.udp_timeout;
@@ -257,8 +257,9 @@ static void redudp_bump_timeout(redudp_client *client)
 	// TODO: implement udp_timeout_stream
 	if (event_add(&client->timeout, &tv) != 0) {
 		redudp_log_error(client, LOG_WARNING, "event_add(&client->timeout, ...)");
-		redudp_drop_client(client);
+		return -1;
 	}
+	return 0;
 }
 
 static void redudp_forward_pkt(redudp_client *client, char *buf, size_t pktlen)
@@ -380,6 +381,7 @@ static void redudp_read_assoc_reply(struct bufferevent *buffev, void *_arg)
 	}
 
 	event_set(&client->udprelay, fd, EV_READ | EV_PERSIST, redudp_pkt_from_socks, client);
+	fd = -1; // ownership belongs to client->udprelay now
 	error = event_add(&client->udprelay, NULL);
 	if (error) {
 		redudp_log_errno(client, LOG_ERR, "event_add");
@@ -548,7 +550,8 @@ static void redudp_first_pkt_from_client(redudp_instance *self, struct sockaddr_
 	if (redsocks_time(&client->first_event) == (time_t)-1)
 		goto fail;
 	client->last_client_event = client->first_event;
-	redudp_bump_timeout(client);
+	if (redudp_bump_timeout(client) != 0)
+		goto fail;
 
 	if (redudp_enqeue_pkt(client, buf, pktlen) == -1)
 		goto fail;
@@ -617,7 +620,10 @@ static void redudp_pkt_from_socks(int fd, short what, void *_arg)
 	}
 
 	redsocks_time(&client->last_relay_event);
-	redudp_bump_timeout(client);
+	if (redudp_bump_timeout(client) != 0) {
+		redudp_drop_client(client);
+		return;
+	}
 
 	int reply_fd = event_get_fd(&client->instance->listener);
 #ifdef __linux__
@@ -672,7 +678,10 @@ static void redudp_pkt_from_client(int fd, short what, void *_arg)
 
 	if (client) {
 		redsocks_time(&client->last_client_event);
-		redudp_bump_timeout(client);
+		if (redudp_bump_timeout(client) != 0) {
+			redudp_drop_client(client);
+			return;
+		}
 		if (event_initialized(&client->udprelay)) {
 			redudp_forward_pkt(client, buf, pktlen);
 		}

@@ -190,18 +190,28 @@ static int getdestaddr_pf_proto(
 	nl.dport = bindaddr->sin_port;
 	nl.af = AF_INET;
 	nl.proto = proto;
-	nl.direction = PF_OUT;
-
-	if (ioctl(pffd, DIOCNATLOOK, &nl) != 0) {
-		if (errno == ENOENT) {
-			nl.direction = PF_IN; // required to redirect local packets
-			if (ioctl(pffd, DIOCNATLOOK, &nl) != 0) {
-				goto fail;
-			}
-		}
-		else {
+	int variants = 1;
+#ifdef __APPLE__
+	/* Darwin keys UDP state by filtering mode; zero never matches UDP. */
+	if (proto == IPPROTO_UDP) {
+		nl.proto_variant = PF_EXTFILTER_APD;
+		variants = PF_EXTFILTER_EI - PF_EXTFILTER_APD + 1;
+	}
+#endif
+	for (int variant = 0; variant < variants; ++variant) {
+		nl.direction = PF_OUT;
+		if (ioctl(pffd, DIOCNATLOOK, &nl) == 0)
+			break;
+		if (errno != ENOENT)
 			goto fail;
-		}
+		nl.direction = PF_IN;
+		if (ioctl(pffd, DIOCNATLOOK, &nl) == 0)
+			break;
+		if (errno != ENOENT || variant + 1 == variants)
+			goto fail;
+#ifdef __APPLE__
+		++nl.proto_variant;
+#endif
 	}
 	memset(destaddr, 0, sizeof(*destaddr));
 #ifdef __APPLE__
