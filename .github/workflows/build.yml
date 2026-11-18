@@ -35,6 +35,11 @@ jobs:
       - name: macOS sample configuration
         if: runner.os == 'macOS'
         run: ./redsocks -t -c examples/redsocks-macos.conf
+      - name: PF forwarding on disposable macOS runner
+        if: runner.os == 'macOS'
+        run: |
+          sudo /sbin/pfctl -f /etc/pf.conf
+          sudo python3 tests/macos_pf_test.py
       - name: Debug build
         run: |
           make clean
