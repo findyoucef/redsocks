@@ -1,0 +1,11 @@
+# Replace 501 with the output of `id -u` for the user to capture.
+capture_user = "501"
+
+# Add the real upstream proxy IP, or the SSH bastion IP if using ssh -D.
+# The documentation address 203.0.113.10 below MUST be replaced or removed.
+table <redsocks_bypass> const { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, \
+    127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, \
+    198.18.0.0/15, 224.0.0.0/4, 240.0.0.0/4, 203.0.113.10 }
+
+rdr pass on lo0 inet proto tcp from any to ! <redsocks_bypass> -> 127.0.0.1 port 12345
+pass out route-to (lo0 127.0.0.1) inet proto tcp from any to ! <redsocks_bypass> user $capture_user
