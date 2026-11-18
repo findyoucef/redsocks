@@ -1,0 +1,41 @@
+name: Build and TCP regressions
+
+on: [push, pull_request, workflow_dispatch]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            cc: gcc
+          - os: ubuntu-24.04
+            cc: clang
+          - os: macos-15-intel
+            cc: clang
+          - os: macos-15
+            cc: clang
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install libevent on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libevent-dev pkg-config
+      - name: Install libevent on macOS
+        if: runner.os == 'macOS'
+        run: brew install libevent pkgconf
+      - name: Build
+        run: make -j2 CC=${{ matrix.cc }}
+      - name: TCP regression tests
+        run: make check CC=${{ matrix.cc }}
+      - name: macOS sample configuration
+        if: runner.os == 'macOS'
+        run: ./redsocks -t -c examples/redsocks-macos.conf
+      - name: Debug build
+        run: |
+          make clean
+          make -j2 DBG_BUILD=1 CC=${{ matrix.cc }}
