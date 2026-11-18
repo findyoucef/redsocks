@@ -470,6 +470,10 @@ static int base_init()
 	}
 
 	if (instance.user) {
+		if (setgroups(0, NULL) < 0) {
+			log_errno(LOG_ERR, "setgroups");
+			goto fail;
+		}
 		if (setuid(uid) < 0) {
 			log_errno(LOG_ERR, "setuid(%i)", uid);
 			goto fail;
