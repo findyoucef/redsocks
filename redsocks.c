@@ -1092,9 +1092,10 @@ static void conn_pressure_lowered()
 static void redsocks_accept_backoff(int fd, short what, void *_null)
 {
 	if (conn_pressure_ongoing()) {
-		conn_pressure(); // rearm timeout
-	} else {
-		accept_enable(); // `accept_backoff_ev` is not pending now
+		conn_pressure(); // may drop idle clients instead of rearming
+	}
+	if (!conn_pressure_ongoing()) {
+		accept_enable();
 	}
 }
 
