@@ -36,7 +36,9 @@ extern app_subsys base_subsys;
 extern app_subsys redudp_subsys;
 #endif
 extern app_subsys dnstc_subsys;
+#ifdef USE_DNSU2T
 extern app_subsys dnsu2t_subsys;
+#endif
 
 app_subsys *subsystems[] = {
 	&redsocks_subsys,
@@ -48,7 +50,9 @@ app_subsys *subsystems[] = {
 	&redudp_subsys,
 #endif
 	&dnstc_subsys,
+#ifdef USE_DNSU2T
 	&dnsu2t_subsys,
+#endif
 };
 
 static const char *confname = "redsocks.conf";

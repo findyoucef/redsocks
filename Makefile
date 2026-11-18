@@ -9,13 +9,13 @@ VERSION := 0.5
 CONF := config.h
 OUT := redsocks
 
-OBJS := parser.o main.o redsocks.o log.o http-connect.o socks4.o socks5.o http-relay.o base.o base64.o md5.o http-auth.o utils.o dnstc.o dnsu2t.o gen/version.o
+OBJS := parser.o main.o redsocks.o log.o http-connect.o socks4.o socks5.o http-relay.o base.o base64.o md5.o http-auth.o utils.o dnstc.o gen/version.o
 LIBS ?= -levent_core
 override CPPFLAGS += $(shell $(PKG_CONFIG) --cflags libevent_core 2>/dev/null)
 LDFLAGS += $(shell $(PKG_CONFIG) --libs-only-L libevent_core 2>/dev/null)
 CFLAGS += -g -O2
 override CFLAGS += -std=c99 -Wall
-override CPPFLAGS += -D_XOPEN_SOURCE=600 -D_DEFAULT_SOURCE -D_GNU_SOURCE
+override CPPFLAGS += -D_DEFAULT_SOURCE -D_GNU_SOURCE
 
 ifneq ($(findstring darwin,$(TARGET_TRIPLE)),)
 override CPPFLAGS += -D_DARWIN_C_SOURCE
@@ -25,12 +25,16 @@ ifneq ($(LIBEVENT_PREFIX),)
 override CPPFLAGS += -I$(LIBEVENT_PREFIX)/include
 LDFLAGS += -L$(LIBEVENT_PREFIX)/lib
 endif
+else
+override CPPFLAGS += -D_XOPEN_SOURCE=600
 endif
 
 ifneq ($(findstring linux,$(TARGET_TRIPLE)),)
 REDUDP ?= 1
+DNSU2T ?= 1
 else
 REDUDP ?= 0
+DNSU2T ?= 0
 endif
 
 ifeq ($(REDUDP),1)
@@ -39,6 +43,13 @@ $(error REDUDP=1 requires a Linux target)
 endif
 OBJS += redudp.o
 override CPPFLAGS += -DUSE_REDUDP
+endif
+ifeq ($(DNSU2T),1)
+ifeq ($(findstring linux,$(TARGET_TRIPLE)),)
+$(error DNSU2T=1 requires a Linux target)
+endif
+OBJS += dnsu2t.o
+override CPPFLAGS += -DUSE_DNSU2T
 endif
 ifeq ($(DBG_BUILD),1)
 OBJS += debug.o

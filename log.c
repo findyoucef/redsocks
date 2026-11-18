@@ -53,9 +53,9 @@ static void fprint_timestamp(
 	 *      then to die and stop service */
 	const char* sprio = getprioname(priority);
 	if (appendix)
-		fprintf(fd, "%lu.%6.6lu %s %s:%u %s(...) %s: %s\n", tv.tv_sec, tv.tv_usec, sprio, file, line, func, message, appendix);
+		fprintf(fd, "%lu.%6.6lu %s %s:%u %s(...) %s: %s\n", (unsigned long)tv.tv_sec, (unsigned long)tv.tv_usec, sprio, file, line, func, message, appendix);
 	else
-		fprintf(fd, "%lu.%6.6lu %s %s:%u %s(...) %s\n", tv.tv_sec, tv.tv_usec, sprio, file, line, func, message);
+		fprintf(fd, "%lu.%6.6lu %s %s:%u %s(...) %s\n", (unsigned long)tv.tv_sec, (unsigned long)tv.tv_usec, sprio, file, line, func, message);
 }
 
 static void stderr_msg(const char *file, int line, const char *func, int priority, const char *message, const char *appendix)

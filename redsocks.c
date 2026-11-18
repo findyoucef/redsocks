@@ -699,7 +699,7 @@ void redsocks_drop_client(redsocks_client *client)
 		redsocks_log_error(client, LOG_INFO, "dropping client (%s), relay (%s), idle %ld.%06lds",
 			redsocks_event_str( (~client->client_evshut) & (EV_READ|EV_WRITE) ),
 			redsocks_event_str( (~client->relay_evshut) & (EV_READ|EV_WRITE) ),
-			idle.tv_sec, idle.tv_usec);
+			(long)idle.tv_sec, (long)idle.tv_usec);
 	}
 
 	if (client->instance->relay_ss->fini)
@@ -1055,7 +1055,7 @@ static void conn_pressure()
 		tvdelay = next;
 	}
 
-	log_error(LOG_WARNING, "accept: backing off for %ld.%06lds", tvdelay.tv_sec, tvdelay.tv_usec);
+	log_error(LOG_WARNING, "accept: backing off for %ld.%06lds", (long)tvdelay.tv_sec, (long)tvdelay.tv_usec);
 
 	if (event_add(&accept_backoff_ev, &tvdelay) != 0)
 		log_errno(LOG_ERR, "event_add");
@@ -1316,8 +1316,8 @@ static uint32_t redsocks_debug_dump_instance(redsocks_instance *instance, struct
 				client->relay ? redsocks_event_str(client->relay->enabled) : "NULL",
 				s_relay_evshut[0] ? " " : "",
 				s_relay_evshut,
-				age.tv_sec, age.tv_usec,
-				idle.tv_sec, idle.tv_usec);
+				(long)age.tv_sec, (long)age.tv_usec,
+				(long)idle.tv_sec, (long)idle.tv_usec);
 		} else {
 			redsocks_pump *pump = red_pump(client);
 
@@ -1344,8 +1344,8 @@ static uint32_t redsocks_debug_dump_instance(redsocks_instance *instance, struct
 				s_relay_evshut[0] ? " " : "",
 				s_relay_evshut,
 
-				age.tv_sec, age.tv_usec,
-				idle.tv_sec, idle.tv_usec);
+				(long)age.tv_sec, (long)age.tv_usec,
+				(long)idle.tv_sec, (long)idle.tv_usec);
 		}
 	}
 	log_error(LOG_NOTICE, "End of client list. %d clients.", conn);
