@@ -6,6 +6,7 @@ typedef struct redudp_config_t {
 	struct sockaddr_in relayaddr;
 	// TODO:           outgoingaddr;
 	struct sockaddr_in destaddr;
+	char *local_tun;
 	char *login;
 	char *password;
 	uint16_t max_pktqueue;

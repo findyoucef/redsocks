@@ -40,8 +40,6 @@ typedef char redsocks_pf_direction_check[offsetof(struct pfioc_natlook, directio
 
 #define PF_IN 1
 #define PF_OUT 2
-#define PF_EXTFILTER_APD 1
-#define PF_EXTFILTER_EI 3
 #define DIOCNATLOOK _IOWR('D', 23, struct pfioc_natlook)
 
 #endif

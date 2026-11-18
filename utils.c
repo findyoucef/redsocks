@@ -85,18 +85,6 @@ int red_recv_udp_pkt(int fd, char *buf, size_t buflen, struct sockaddr_in *inadd
 			log_error(LOG_WARNING, "(SOL_IP, IP_ORIGDSTADDR) not found");
 			return -1;
 		}
-#elif defined(__APPLE__)
-		struct sockaddr_in local;
-		socklen_t len = sizeof(local);
-		if (getsockname(fd, (struct sockaddr*)&local, &len) != 0)
-			return -1;
-		for (struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg); cmsg; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
-			if (cmsg->cmsg_level == IPPROTO_IP && cmsg->cmsg_type == IP_RECVDSTADDR &&
-			    cmsg->cmsg_len >= CMSG_LEN(sizeof(local.sin_addr)))
-				memcpy(&local.sin_addr, CMSG_DATA(cmsg), sizeof(local.sin_addr));
-		}
-		if (get_udp_destaddr(inaddr, &local, toaddr) != 0)
-			return -1;
 #else
 		log_error(LOG_WARNING, "transparent UDP destination lookup is unavailable");
 		return -1;

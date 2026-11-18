@@ -30,7 +30,6 @@
 #include <pwd.h>
 #include <grp.h>
 #include <stdlib.h>
-#include <errno.h>
 #include "config.h"
 #if defined USE_IPTABLES
 # include <limits.h>
@@ -174,8 +173,8 @@ static int redir_init_pf()
 	return redir_open_private("/dev/pf", O_RDWR);
 }
 
-static int getdestaddr_pf_proto(
-		int proto, const struct sockaddr_in *client, const struct sockaddr_in *bindaddr,
+static int getdestaddr_pf(
+		int fd, const struct sockaddr_in *client, const struct sockaddr_in *bindaddr,
 		struct sockaddr_in *destaddr)
 {
 	int pffd = instance.redirector->private;
@@ -189,29 +188,19 @@ static int getdestaddr_pf_proto(
 	nl.daddr.v4.s_addr = bindaddr->sin_addr.s_addr;
 	nl.dport = bindaddr->sin_port;
 	nl.af = AF_INET;
-	nl.proto = proto;
-	int variants = 1;
-#ifdef __APPLE__
-	/* Darwin keys UDP state by filtering mode; zero never matches UDP. */
-	if (proto == IPPROTO_UDP) {
-		nl.proto_variant = PF_EXTFILTER_APD;
-		variants = PF_EXTFILTER_EI - PF_EXTFILTER_APD + 1;
-	}
-#endif
-	for (int variant = 0; variant < variants; ++variant) {
-		nl.direction = PF_OUT;
-		if (ioctl(pffd, DIOCNATLOOK, &nl) == 0)
-			break;
-		if (errno != ENOENT)
+	nl.proto = IPPROTO_TCP;
+	nl.direction = PF_OUT;
+
+	if (ioctl(pffd, DIOCNATLOOK, &nl) != 0) {
+		if (errno == ENOENT) {
+			nl.direction = PF_IN; // required to redirect local packets
+			if (ioctl(pffd, DIOCNATLOOK, &nl) != 0) {
+				goto fail;
+			}
+		}
+		else {
 			goto fail;
-		nl.direction = PF_IN;
-		if (ioctl(pffd, DIOCNATLOOK, &nl) == 0)
-			break;
-		if (errno != ENOENT || variant + 1 == variants)
-			goto fail;
-#ifdef __APPLE__
-		++nl.proto_variant;
-#endif
+		}
 	}
 	memset(destaddr, 0, sizeof(*destaddr));
 #ifdef __APPLE__
@@ -233,12 +222,6 @@ fail:
 	log_errno(LOG_WARNING, "ioctl(DIOCNATLOOK {src=%s:%d, dst=%s:%d})",
 			  clientaddr_str, ntohs(nl.sport), bindaddr_str, ntohs(nl.dport));
 	return -1;
-}
-
-static int getdestaddr_pf(int fd, const struct sockaddr_in *client,
-		const struct sockaddr_in *bindaddr, struct sockaddr_in *destaddr)
-{
-	return getdestaddr_pf_proto(IPPROTO_TCP, client, bindaddr, destaddr);
 }
 #endif
 
@@ -273,17 +256,6 @@ static int getdestaddr_generic(int fd, const struct sockaddr_in *client, const s
 int getdestaddr(int fd, const struct sockaddr_in *client, const struct sockaddr_in *bindaddr, struct sockaddr_in *destaddr)
 {
 	return instance.redirector->getdestaddr(fd, client, bindaddr, destaddr);
-}
-
-int get_udp_destaddr(const struct sockaddr_in *client, const struct sockaddr_in *bindaddr, struct sockaddr_in *destaddr)
-{
-#ifdef USE_PF
-	if (instance.redirector->getdestaddr == getdestaddr_pf)
-		return getdestaddr_pf_proto(IPPROTO_UDP, client, bindaddr, destaddr);
-#endif
-	errno = ENOTSUP;
-	log_errno(LOG_WARNING, "UDP destination lookup requires the pf redirector");
-	return -1;
 }
 
 int apply_tcp_keepalive(int fd)

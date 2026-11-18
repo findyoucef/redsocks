@@ -47,6 +47,9 @@ $(error REDUDP=1 requires a Linux or macOS target)
 endif
 OBJS += redudp.o
 override CPPFLAGS += -DUSE_REDUDP
+ifneq ($(findstring darwin,$(TARGET_TRIPLE)),)
+OBJS += redudp-darwin.o
+endif
 endif
 ifeq ($(DNSU2T),1)
 ifeq ($(findstring linux,$(TARGET_TRIPLE)),)

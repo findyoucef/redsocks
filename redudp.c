@@ -33,6 +33,9 @@
 #include "redsocks.h"
 #include "redudp.h"
 #include "libc-compat.h"
+#ifdef __APPLE__
+#include "redudp-darwin.h"
+#endif
 
 #define redudp_log_error(client, prio, msg...) \
 	redsocks_log_write_plain(__FILE__, __LINE__, __func__, 0, &(client)->clientaddr, get_destaddr(client), prio, ## msg)
@@ -640,6 +643,12 @@ static void redudp_pkt_from_socks(int fd, short what, void *_arg)
 #endif
 
 	fwdlen = pktlen - sizeof(pkt.header);
+#ifdef __APPLE__
+	if (client->instance->config.local_tun) {
+		outgoing = redudp_write_tun(reply_fd, pkt.buf + sizeof(pkt.header), fwdlen,
+			&client->clientaddr, &client->destaddr);
+	} else
+#endif
 	outgoing = sendto(reply_fd,
 	                  pkt.buf + sizeof(pkt.header), fwdlen, 0,
 	                  (struct sockaddr*)&client->clientaddr, sizeof(client->clientaddr));
@@ -661,6 +670,11 @@ static void redudp_pkt_from_client(int fd, short what, void *_arg)
 	pdestaddr = do_tproxy(self) ? &destaddr : NULL;
 
 	assert(fd == event_get_fd(&self->listener));
+#ifdef __APPLE__
+	if (self->config.local_tun)
+		pktlen = redudp_read_tun(fd, buf, sizeof(buf), &clientaddr, &destaddr);
+	else
+#endif
 	pktlen = red_recv_udp_pkt(fd, buf, sizeof(buf), &clientaddr, pdestaddr);
 	if (pktlen == -1)
 		return;
@@ -699,6 +713,7 @@ static void redudp_pkt_from_client(int fd, short what, void *_arg)
  */
 static parser_entry redudp_entries[] =
 {
+	{ .key = "local_tun",  .type = pt_pchar },
 	{ .key = "local_ip",   .type = pt_in_addr },
 	{ .key = "local_port", .type = pt_uint16 },
 	{ .key = "ip",         .type = pt_in_addr },
@@ -735,6 +750,7 @@ static int redudp_onenter(parser_section *section)
 
 	for (parser_entry *entry = &section->entries[0]; entry->key; entry++)
 		entry->addr =
+			(strcmp(entry->key, "local_tun") == 0)  ? (void*)&instance->config.local_tun :
 			(strcmp(entry->key, "local_ip") == 0)   ? (void*)&instance->config.bindaddr.sin_addr :
 			(strcmp(entry->key, "local_port") == 0) ? (void*)&instance->config.bindaddr.sin_port :
 			(strcmp(entry->key, "ip") == 0)         ? (void*)&instance->config.relayaddr.sin_addr :
@@ -762,6 +778,21 @@ static int redudp_onexit(parser_section *section)
 	instance->config.bindaddr.sin_port = htons(instance->config.bindaddr.sin_port);
 	instance->config.relayaddr.sin_port = htons(instance->config.relayaddr.sin_port);
 	instance->config.destaddr.sin_port = htons(instance->config.destaddr.sin_port);
+	if (instance->config.local_tun && (instance->config.destaddr.sin_addr.s_addr || instance->config.bindaddr.sin_port)) {
+		parser_error(section->context, "local_tun cannot be combined with dest_ip/dest_port or local_port");
+		return -1;
+	}
+#ifdef __APPLE__
+	if (!instance->config.local_tun && !instance->config.destaddr.sin_addr.s_addr) {
+		parser_error(section->context, "macOS UDP requires dest_ip/dest_port or local_tun");
+		return -1;
+	}
+#else
+	if (instance->config.local_tun) {
+		parser_error(section->context, "local_tun requires macOS");
+		return -1;
+	}
+#endif
 
 	if (!instance->config.udp_timeout ||
 	    (!!instance->config.destaddr.sin_addr.s_addr != !!instance->config.destaddr.sin_port)) {
@@ -788,52 +819,58 @@ static int redudp_init_instance(redudp_instance *instance)
 	int error;
 	int fd = -1;
 
-	fd = socket(AF_INET, SOCK_DGRAM, 0);
-	if (fd == -1) {
-		log_errno(LOG_ERR, "socket");
-		goto fail;
-	}
-
-	if (do_tproxy(instance)) {
-		int on = 1;
-#ifdef __linux__
-		char buf[RED_INET_ADDRSTRLEN];
-		// iptables TPROXY target does not send packets to non-transparent sockets
-		if (0 != redudp_transparent(fd))
-			goto fail;
-
-		error = setsockopt(fd, SOL_IP, IP_RECVORIGDSTADDR, &on, sizeof(on));
-		if (error) {
-			log_errno(LOG_ERR, "setsockopt(listener, SOL_IP, IP_RECVORIGDSTADDR)");
+#ifdef __APPLE__
+	if (instance->config.local_tun) {
+		fd = redudp_open_tun(instance->config.local_tun);
+		if (fd == -1) {
+			log_errno(LOG_ERR, "open %s", instance->config.local_tun);
 			goto fail;
 		}
-
-		log_error(LOG_DEBUG, "redudp @ %s: TPROXY", red_inet_ntop(&instance->config.bindaddr, buf, sizeof(buf)));
-#elif defined(__APPLE__)
-		error = setsockopt(fd, IPPROTO_IP, IP_RECVDSTADDR, &on, sizeof(on));
-		if (error) {
-			log_errno(LOG_ERR, "setsockopt(IP_RECVDSTADDR)");
-			goto fail;
-		}
+		log_error(LOG_NOTICE, "UDP capture on %s; configure its IPv4 address and MTU before routing traffic", instance->config.local_tun);
+	} else
 #endif
-	}
-	else {
-		char buf1[RED_INET_ADDRSTRLEN], buf2[RED_INET_ADDRSTRLEN];
-		log_error(LOG_DEBUG, "redudp @ %s: destaddr=%s",
-			red_inet_ntop(&instance->config.bindaddr, buf1, sizeof(buf1)),
-			red_inet_ntop(&instance->config.destaddr, buf2, sizeof(buf2)));
-	}
+	{
+		fd = socket(AF_INET, SOCK_DGRAM, 0);
+		if (fd == -1) {
+			log_errno(LOG_ERR, "socket");
+			goto fail;
+		}
 
-	error = bind(fd, (struct sockaddr*)&instance->config.bindaddr, sizeof(instance->config.bindaddr));
-	if (error) {
-		log_errno(LOG_ERR, "bind");
-		goto fail;
-	}
+		if (do_tproxy(instance)) {
+#ifdef __linux__
+			int on = 1;
+			char buf[RED_INET_ADDRSTRLEN];
+			// iptables TPROXY target does not send packets to non-transparent sockets
+			if (0 != redudp_transparent(fd))
+				goto fail;
 
-	error = fcntl_nonblock(fd);
-	if (error) {
-		log_errno(LOG_ERR, "fcntl");
-		goto fail;
+			error = setsockopt(fd, SOL_IP, IP_RECVORIGDSTADDR, &on, sizeof(on));
+			if (error) {
+				log_errno(LOG_ERR, "setsockopt(listener, SOL_IP, IP_RECVORIGDSTADDR)");
+				goto fail;
+			}
+
+			log_error(LOG_DEBUG, "redudp @ %s: TPROXY", red_inet_ntop(&instance->config.bindaddr, buf, sizeof(buf)));
+#endif
+		}
+		else {
+			char buf1[RED_INET_ADDRSTRLEN], buf2[RED_INET_ADDRSTRLEN];
+			log_error(LOG_DEBUG, "redudp @ %s: destaddr=%s",
+				red_inet_ntop(&instance->config.bindaddr, buf1, sizeof(buf1)),
+				red_inet_ntop(&instance->config.destaddr, buf2, sizeof(buf2)));
+		}
+
+		error = bind(fd, (struct sockaddr*)&instance->config.bindaddr, sizeof(instance->config.bindaddr));
+		if (error) {
+			log_errno(LOG_ERR, "bind");
+			goto fail;
+		}
+
+		error = fcntl_nonblock(fd);
+		if (error) {
+			log_errno(LOG_ERR, "fcntl");
+			goto fail;
+		}
 	}
 
 	event_set(&instance->listener, fd, EV_READ | EV_PERSIST, redudp_pkt_from_client, instance);
@@ -880,6 +917,7 @@ static void redudp_fini_instance(redudp_instance *instance)
 
 	free(instance->config.login);
 	free(instance->config.password);
+	free(instance->config.local_tun);
 
 	memset(instance, 0, sizeof(*instance));
 	free(instance);

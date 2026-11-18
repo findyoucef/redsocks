@@ -2,6 +2,7 @@
 """Live PF UDP test on a narrowly scoped benchmark destination range."""
 
 import socket
+import subprocess
 import unittest
 
 from macos_pf_test import pf_anchor, require_pf
@@ -24,6 +25,16 @@ def client():
     return result
 
 
+def configure_tun(name):
+    subprocess.run(["/sbin/ifconfig", name, "inet", "198.18.255.1", "198.18.255.2",
+                    "netmask", "255.255.255.255", "mtu", "65535", "up"], check=True)
+
+
+def tunnel_rules(name):
+    return (f"pass out route-to ({name} 198.18.255.2) inet proto udp from any "
+            "to 198.18.0.0/24 port 18080:18081 user root\n")
+
+
 class PFUDPTests(unittest.TestCase):
     def test_fixed_destination(self):
         destination = ("198.18.0.123", 18080)
@@ -39,8 +50,9 @@ class PFUDPTests(unittest.TestCase):
 
     def test_one_socket_multiple_destinations(self):
         destinations = [("198.18.0.123", 18080), ("198.18.0.124", 18080), ("198.18.0.123", 18081)]
-        with udp_proxy() as upstream, udp_redirector(upstream, None, "pf") as (port, _):
-            with pf_anchor(rules(port)), client() as app:
+        with udp_proxy() as upstream, udp_redirector(upstream, None, local_tun="utun100"):
+            configure_tun("utun100")
+            with pf_anchor(tunnel_rules("utun100")), client() as app:
                 for wave in range(2):
                     expected = {f"{wave}:{index}".encode(): target for index, target in enumerate(destinations)}
                     for payload, target in expected.items():
@@ -54,11 +66,23 @@ class PFUDPTests(unittest.TestCase):
 
     def test_two_clients(self):
         target = ("198.18.0.123", 18080)
-        with udp_proxy() as upstream, udp_redirector(upstream, None, "pf") as (port, _):
-            with pf_anchor(rules(port)), client() as first, client() as second:
+        with udp_proxy() as upstream, udp_redirector(upstream, None, local_tun="utun100"):
+            configure_tun("utun100")
+            with pf_anchor(tunnel_rules("utun100")), client() as first, client() as second:
                 exchange(first, target, b"client one")
                 exchange(second, target, b"client two")
             self.assertEqual(upstream.associations, 2)
+
+    def test_tunnel_connected_large_and_empty(self):
+        target = ("198.18.0.123", 18080)
+        with udp_proxy(auth=True, wildcard=True) as upstream, udp_redirector(upstream, None, local_tun="utun100"):
+            configure_tun("utun100")
+            with pf_anchor(tunnel_rules("utun100")), client() as app:
+                app.connect(target)
+                for payload in [b"", bytes(range(256)) * 32]:
+                    app.send(payload)
+                    data, sender = app.recvfrom(65535)
+                    self.assertEqual((data, sender), (payload, target))
 
 
 if __name__ == "__main__":
