@@ -14,6 +14,7 @@ import pwd
 import socket
 import socketserver
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -147,6 +148,10 @@ def redirector(server, extra="", backend="generic"):
                 else:
                     raise AssertionError("redsocks did not start")
                 yield port, process
+            except Exception:
+                log.seek(0)
+                print("redsocks output:\n" + log.read(), file=sys.stderr)
+                raise
             finally:
                 if process.poll() is None:
                     process.terminate()
