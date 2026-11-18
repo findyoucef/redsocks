@@ -124,14 +124,10 @@ def configuration(port, upstream, protocol, extra="", auth=False, backend="gener
 
 
 @contextlib.contextmanager
-def redirector(server, extra="", backend="generic"):
+def daemon(config_text):
     with tempfile.TemporaryDirectory(prefix="redsocks-test-") as tmp:
-        with socket.socket() as reservation:
-            reservation.bind(("127.0.0.1", 0))
-            port = reservation.getsockname()[1]
         config = Path(tmp) / "redsocks.conf"
-        config.write_text(configuration(port, server.server_address[1],
-                                        server.protocol, extra, server.auth, backend))
+        config.write_text(config_text)
         with (Path(tmp) / "stderr").open("w+") as log:
             process = subprocess.Popen([str(BINARY), "-c", str(config)],
                                        stdout=log, stderr=log)
@@ -147,7 +143,7 @@ def redirector(server, extra="", backend="generic"):
                     time.sleep(0.02)
                 else:
                     raise AssertionError("redsocks did not start")
-                yield port, process
+                yield process
             except Exception:
                 log.seek(0)
                 print("redsocks output:\n" + log.read(), file=sys.stderr)
@@ -164,6 +160,17 @@ def redirector(server, extra="", backend="generic"):
                 output = log.read()
             if process.returncode != 0:
                 raise AssertionError(f"redsocks exit {process.returncode}: {output}")
+
+
+@contextlib.contextmanager
+def redirector(server, extra="", backend="generic"):
+    with socket.socket() as reservation:
+        reservation.bind(("127.0.0.1", 0))
+        port = reservation.getsockname()[1]
+    config = configuration(port, server.server_address[1], server.protocol,
+                           extra, server.auth, backend)
+    with daemon(config) as process:
+        yield port, process
 
 
 def echo(port, payload=b"tunneled bytes\r\n"):

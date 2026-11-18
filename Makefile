@@ -33,13 +33,17 @@ ifneq ($(findstring linux,$(TARGET_TRIPLE)),)
 REDUDP ?= 1
 DNSU2T ?= 1
 else
-REDUDP ?= 0
 DNSU2T ?= 0
+ifneq ($(findstring darwin,$(TARGET_TRIPLE)),)
+REDUDP ?= 1
+else
+REDUDP ?= 0
+endif
 endif
 
 ifeq ($(REDUDP),1)
-ifeq ($(findstring linux,$(TARGET_TRIPLE)),)
-$(error REDUDP=1 requires a Linux target)
+ifeq ($(findstring linux,$(TARGET_TRIPLE))$(findstring darwin,$(TARGET_TRIPLE)),)
+$(error REDUDP=1 requires a Linux or macOS target)
 endif
 OBJS += redudp.o
 override CPPFLAGS += -DUSE_REDUDP
@@ -87,6 +91,9 @@ $(OUT): $(OBJS)
 
 check: $(OUT)
 	$(PYTHON) tests/native_test.py
+ifeq ($(REDUDP),1)
+	$(PYTHON) tests/udp_test.py
+endif
 
 install: $(OUT)
 	install -d $(DESTDIR)$(PREFIX)/sbin

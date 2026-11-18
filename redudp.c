@@ -43,13 +43,16 @@ static void redudp_pkt_from_socks(int fd, short what, void *_arg);
 static void redudp_drop_client(redudp_client *client);
 static void redudp_fini_instance(redudp_instance *instance);
 static int redudp_fini();
+#ifdef __linux__
 static int redudp_transparent(int fd);
+#endif
 
 typedef struct redudp_expected_assoc_reply_t {
 	socks5_reply h;
 	socks5_addr_ipv4 ip;
 } PACKED redudp_expected_assoc_reply;
 
+#ifdef __linux__
 struct bound_udp4_key {
 	struct in_addr sin_addr;
 	uint16_t       sin_port;
@@ -166,6 +169,15 @@ static int redudp_transparent(int fd)
 	return error;
 }
 
+#endif /* __linux__ */
+
+static int same_endpoint(const struct sockaddr_in *a, const struct sockaddr_in *b)
+{
+	return a->sin_family == b->sin_family
+	    && a->sin_addr.s_addr == b->sin_addr.s_addr
+	    && a->sin_port == b->sin_port;
+}
+
 static int do_tproxy(redudp_instance* instance)
 {
 	return instance->config.destaddr.sin_addr.s_addr == 0;
@@ -173,10 +185,7 @@ static int do_tproxy(redudp_instance* instance)
 
 static struct sockaddr_in* get_destaddr(redudp_client *client)
 {
-	if (do_tproxy(client->instance))
-		return &client->destaddr;
-	else
-		return &client->instance->config.destaddr;
+	return &client->destaddr;
 }
 
 static void redudp_fill_preamble(socks5_udp_preabmle *preamble, redudp_client *client)
@@ -203,7 +212,7 @@ static struct evbuffer* socks5_mkpassword_plain_wrapper(void *p)
 static struct evbuffer* socks5_mkassociate(void *p)
 {
 	struct sockaddr_in sa;
-	p = p; /* Make compiler happy */
+	UNUSED(p);
 	memset(&sa, 0, sizeof(sa));
 	sa.sin_family = AF_INET;
 	return socks5_mkcommand_plain(socks5_cmd_udp_associate, &sa);
@@ -228,8 +237,10 @@ static void redudp_drop_client(redudp_client *client)
 			redudp_log_errno(client, LOG_ERR, "event_del");
 		redsocks_close(fd);
 	}
+#ifdef __linux__
 	if (client->sender_fd != -1)
 		bound_udp4_put(&client->destaddr);
+#endif
 	list_for_each_entry_safe(q, tmp, &client->queue, list) {
 		list_del(&q->list);
 		free(q);
@@ -260,8 +271,7 @@ static void redudp_forward_pkt(redudp_client *client, char *buf, size_t pktlen)
 	redudp_fill_preamble(&req, client);
 
 	memset(&msg, 0, sizeof(msg));
-	msg.msg_name = &client->udprelayaddr;
-	msg.msg_namelen = sizeof(client->udprelayaddr);
+	// The relay socket is connected; Darwin rejects another destination here.
 	msg.msg_iov = io;
 	msg.msg_iovlen = SIZEOF_ARRAY(io);
 
@@ -334,7 +344,7 @@ static void redudp_read_assoc_reply(struct bufferevent *buffev, void *_arg)
 		goto fail;
 	}
 
-	if (reply.h.ver != socks5_ver) {
+	if (reply.h.ver != socks5_ver || reply.h.reserved != 0) {
 		redudp_log_error(client, LOG_NOTICE, "Socks5 server reported unexpected reply version: %u", reply.h.ver);
 		goto fail;
 	}
@@ -354,6 +364,8 @@ static void redudp_read_assoc_reply(struct bufferevent *buffev, void *_arg)
 	client->udprelayaddr.sin_family = AF_INET;
 	client->udprelayaddr.sin_port = reply.ip.port;
 	client->udprelayaddr.sin_addr.s_addr = reply.ip.addr;
+	if (reply.ip.addr == htonl(INADDR_ANY))
+		client->udprelayaddr.sin_addr = client->instance->config.relayaddr.sin_addr;
 
 	fd = socket(AF_INET, SOCK_DGRAM, 0);
 	if (fd == -1) {
@@ -522,8 +534,7 @@ static void redudp_first_pkt_from_client(redudp_instance *self, struct sockaddr_
 	INIT_LIST_HEAD(&client->queue);
 	client->instance = self;
 	memcpy(&client->clientaddr, clientaddr, sizeof(*clientaddr));
-	if (destaddr)
-		memcpy(&client->destaddr, destaddr, sizeof(client->destaddr));
+	memcpy(&client->destaddr, destaddr, sizeof(client->destaddr));
 	evtimer_set(&client->timeout, redudp_timeout, client);
 	// XXX: self->relay_ss->init(client);
 
@@ -566,10 +577,15 @@ static void redudp_pkt_from_socks(int fd, short what, void *_arg)
 	if (pktlen == -1)
 		return;
 
-	if (memcmp(&udprelayaddr, &client->udprelayaddr, sizeof(udprelayaddr)) != 0) {
+	if (!same_endpoint(&udprelayaddr, &client->udprelayaddr)) {
 		char buf[RED_INET_ADDRSTRLEN];
 		redudp_log_error(client, LOG_NOTICE, "Got packet from unexpected address %s.",
 		                 red_inet_ntop(&udprelayaddr, buf, sizeof(buf)));
+		return;
+	}
+
+	if (pktlen < sizeof(pkt.header) || pkt.header.reserved != 0) {
+		redudp_log_error(client, LOG_NOTICE, "Malformed SOCKS5 UDP header");
 		return;
 	}
 
@@ -603,6 +619,8 @@ static void redudp_pkt_from_socks(int fd, short what, void *_arg)
 	redsocks_time(&client->last_relay_event);
 	redudp_bump_timeout(client);
 
+	int reply_fd = event_get_fd(&client->instance->listener);
+#ifdef __linux__
 	if (do_tproxy(client->instance) && client->sender_fd == -1) {
 		client->sender_fd = bound_udp4_get(&client->destaddr);
 		if (client->sender_fd == -1) {
@@ -611,10 +629,12 @@ static void redudp_pkt_from_socks(int fd, short what, void *_arg)
 		}
 	}
 
+	if (do_tproxy(client->instance))
+		reply_fd = client->sender_fd;
+#endif
+
 	fwdlen = pktlen - sizeof(pkt.header);
-	outgoing = sendto(do_tproxy(client->instance)
-	                      ? client->sender_fd
-	                      : event_get_fd(&client->instance->listener),
+	outgoing = sendto(reply_fd,
 	                  pkt.buf + sizeof(pkt.header), fwdlen, 0,
 	                  (struct sockaddr*)&client->clientaddr, sizeof(client->clientaddr));
 	if (outgoing != fwdlen) {
@@ -639,10 +659,12 @@ static void redudp_pkt_from_client(int fd, short what, void *_arg)
 	if (pktlen == -1)
 		return;
 
+	if (!pdestaddr)
+		pdestaddr = &self->config.destaddr;
+
 	// TODO: this lookup may be SLOOOOOW.
 	list_for_each_entry(tmp, &self->clients, list) {
-		// TODO: check destaddr
-		if (0 == memcmp(&clientaddr, &tmp->clientaddr, sizeof(clientaddr))) {
+		if (same_endpoint(&clientaddr, &tmp->clientaddr) && same_endpoint(pdestaddr, &tmp->destaddr)) {
 			client = tmp;
 			break;
 		}
@@ -732,6 +754,12 @@ static int redudp_onexit(parser_section *section)
 	instance->config.relayaddr.sin_port = htons(instance->config.relayaddr.sin_port);
 	instance->config.destaddr.sin_port = htons(instance->config.destaddr.sin_port);
 
+	if (!instance->config.udp_timeout ||
+	    (!!instance->config.destaddr.sin_addr.s_addr != !!instance->config.destaddr.sin_port)) {
+		parser_error(section->context, "udp_timeout must be positive; specify both dest_ip and dest_port, or neither");
+		return -1;
+	}
+
 	if (instance->config.udp_timeout_stream < instance->config.udp_timeout) {
 		parser_error(section->context, "udp_timeout_stream should be not less then udp_timeout");
 		return -1;
@@ -759,6 +787,7 @@ static int redudp_init_instance(redudp_instance *instance)
 
 	if (do_tproxy(instance)) {
 		int on = 1;
+#ifdef __linux__
 		char buf[RED_INET_ADDRSTRLEN];
 		// iptables TPROXY target does not send packets to non-transparent sockets
 		if (0 != redudp_transparent(fd))
@@ -771,6 +800,13 @@ static int redudp_init_instance(redudp_instance *instance)
 		}
 
 		log_error(LOG_DEBUG, "redudp @ %s: TPROXY", red_inet_ntop(&instance->config.bindaddr, buf, sizeof(buf)));
+#elif defined(__APPLE__)
+		error = setsockopt(fd, IPPROTO_IP, IP_RECVDSTADDR, &on, sizeof(on));
+		if (error) {
+			log_errno(LOG_ERR, "setsockopt(IP_RECVDSTADDR)");
+			goto fail;
+		}
+#endif
 	}
 	else {
 		char buf1[RED_INET_ADDRSTRLEN], buf2[RED_INET_ADDRSTRLEN];
