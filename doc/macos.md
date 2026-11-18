@@ -236,6 +236,14 @@ identical throughput across hardware or operating systems. CI records these
 measurements alongside functional tests. The DNS relay also uses buffered TCP,
 so it handles partial writes without requiring Linux Fast Open.
 
+For the validated parity build, the CI loopback measurements were 45.78 MiB/s
+on Intel macOS and 339.82 MiB/s on Apple Silicon macOS. Linux/GCC measured
+174.71 MiB/s buffered and 1,728.44 MiB/s with splice. These runners have different
+hardware and load, so the figures establish a working data path rather than a
+controlled OS comparison. The feature parity claim does not include matching
+Linux splice throughput.
+
+
 ## Limits
 
 - Only IPv4 is supported. IPv6 remains outside these interception rules. Only
@@ -301,7 +309,8 @@ their own PF enable references. Like other PF rules, an existing quick rule or
 Both privileged suites pass on Intel and Apple Silicon macOS CI runners
 (macOS 15). The user also confirmed the TCP test's PASS result on the target Apple Silicon
 Mac running macOS
-26.7.3. UDP interception has not been exercised on that target Mac yet. These
+26.7.3. The new UDP and privilege-separation paths have not been exercised on that
+target Mac yet. These
 checks use local SOCKS5 test servers; an external UDP relay and the target
 machine's existing firewall/VPN configuration still require their own
 validation.

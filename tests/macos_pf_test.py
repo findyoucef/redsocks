@@ -13,6 +13,7 @@ import socket
 import subprocess
 import sys
 import pwd
+import signal
 
 from native_test import proxy, receive, redirector
 
@@ -76,6 +77,22 @@ def run(extra=""):
                     client.sendall(payload)
                     if receive(client, len(payload)) != payload:
                         raise AssertionError("PF tunnel did not preserve data")
+                if extra:
+                    processes = subprocess.check_output(["ps", "-axo", "pid=,ppid=,uid="], text=True)
+                    children = [int(row[0]) for line in processes.splitlines()
+                                if len(row := line.split()) == 3 and int(row[1]) == process.pid and int(row[2]) == 0]
+                    assert len(children) == 1, children
+                    os.kill(children[0], signal.SIGTERM)
+                    # The worker must reject new connections when lookup is unavailable.
+                    with socket.create_connection((destination, target_port), timeout=5) as client:
+                        client.settimeout(3)
+                        try:
+                            client.sendall(b"must not be forwarded")
+                            assert client.recv(1) == b""
+                        except ConnectionResetError:
+                            pass
+                    assert process.poll() is None
+
     print("PASS: PF redirected IPv4 TCP and SOCKS5 received the original destination.")
 
 

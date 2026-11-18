@@ -5,10 +5,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <errno.h>
-#include <signal.h>
 #include <string.h>
-#include <stdlib.h>
-#include <fcntl.h>
 #include "pf-darwin.h"
 #include "pf-helper.h"
 
@@ -101,20 +98,17 @@ int pf_helper_start(int pf)
 	if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair))
 		return -1;
 	int on = 1;
-	setsockopt(pair[0], SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof(on));
-	setsockopt(pair[1], SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof(on));
 	/* The worker must not hang if its helper is stopped or dies. */
 	struct timeval timeout = {2, 0};
-	setsockopt(pair[0], SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-	setsockopt(pair[0], SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
-	setsockopt(pair[1], SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+	if (setsockopt(pair[0], SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof(on)) ||
+	    setsockopt(pair[1], SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof(on)) ||
+	    setsockopt(pair[0], SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) ||
+	    setsockopt(pair[0], SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) ||
+	    setsockopt(pair[1], SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)))
+		goto fail;
 	helper_pid = fork();
-	if (helper_pid == -1) {
-		int saved = errno;
-		close(pair[0]); close(pair[1]);
-		errno = saved;
-		return -1;
-	}
+	if (helper_pid == -1)
+		goto fail;
 	if (!helper_pid) {
 		/* Discard inherited listeners, tunnels, log files and event queues. */
 		int limit = getdtablesize();
@@ -125,6 +119,13 @@ int pf_helper_start(int pf)
 	}
 	close(pair[1]);
 	return pair[0];
+fail: {
+	int saved = errno;
+	close(pair[0]);
+	close(pair[1]);
+	errno = saved;
+	return -1;
+}
 }
 
 int pf_helper_lookup(int channel, int connection, struct sockaddr_in *destination)

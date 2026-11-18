@@ -444,8 +444,6 @@ static int base_init()
 		uid = pw->pw_uid;
 	}
 
-
-
 	if (instance.group) {
 		struct group *gr = getgrnam(instance.group);
 		if (gr == NULL) {
