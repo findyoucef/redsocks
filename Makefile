@@ -6,6 +6,7 @@ PKG_CONFIG ?= pkg-config
 PREFIX ?= /usr/local
 PYTHON ?= python3
 VERSION := 0.5
+RELEASE_VERSION ?=
 CONF := config.h
 OUT := redsocks
 
@@ -79,7 +80,8 @@ ifeq ($(DBG_BUILD),1)
 endif
 
 gen/version.c: $(wildcard *.c *.h) gen/.build
-	@version=$$(git describe --tags --always --dirty 2>/dev/null || printf '$(VERSION)'); \
+	@version='$(RELEASE_VERSION)'; \
+	test -n "$$version" || version=$$(git describe --tags --always --dirty 2>/dev/null || printf '$(VERSION)'); \
 	printf '#include "../version.h"\nconst char *redsocks_version = "redsocks/%s";\n' "$$version" >$@
 
 gen/.build:

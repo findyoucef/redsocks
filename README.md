@@ -156,6 +156,12 @@ You can get a copy at http://www.apache.org/licenses/LICENSE-2.0.html
 * Gentoo: https://packages.gentoo.org/packages/net-proxy/redsocks
 * Ubuntu: http://packages.ubuntu.com/search?searchon=names&keywords=redsocks
 
+## Binary packages
+
+See [packages and releases](doc/releases.md) for macOS and Linux downloads,
+installation, and version-tagged publication. CI previews are available as
+workflow artifacts; tagged versions are published to GitHub Releases.
+
 ## Compilation
 
 [libevent 2.x](https://libevent.org/) is required.

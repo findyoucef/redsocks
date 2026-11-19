@@ -1,0 +1,103 @@
+name: Packages and releases
+
+on:
+  push:
+    branches: [main, feature/release-packages]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: packages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - id: version
+        shell: python
+        run: |
+          import os, re
+          ref = os.environ['GITHUB_REF']
+          version = ref.removeprefix('refs/tags/v') if ref.startswith('refs/tags/') else '0.0.0'
+          if not re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', version):
+              raise SystemExit('Release tags must be vMAJOR.MINOR.PATCH')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f'version={version}\n')
+  package:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: linux-x86_64
+          - os: macos-15
+            target: macos-arm64
+          - os: macos-15-intel
+            target: macos-x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Linux dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libevent-dev pkg-config
+      - name: macOS dependencies
+        if: runner.os == 'macOS'
+        run: |
+          for formula in libevent pkgconf; do
+            brew list --versions "$formula" >/dev/null || brew install "$formula"
+          done
+      - name: Build, test and package
+        env:
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+        run: python3 packaging/build.py "$RELEASE_VERSION"
+      - name: Live macOS interception
+        if: runner.os == 'macOS'
+        run: |
+          sudo /sbin/pfctl -f /etc/pf.conf
+          sudo python3 tests/macos_pf_test.py
+          sudo python3 tests/macos_udp_test.py
+      - name: Verify archive and installer payloads
+        env:
+          PACKAGE_TARGET: ${{ matrix.target }}
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+        run: python3 packaging/verify.py "$RELEASE_VERSION" "$PACKAGE_TARGET"
+      - name: Upload tested packages
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: packages-${{ matrix.target }}
+          path: dist/${{ matrix.target }}/*
+          if-no-files-found: error
+          retention-days: 14
+  publish:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [version, package]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Require a commit on main
+        run: git merge-base --is-ancestor HEAD origin/main
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: packages-*
+          path: release-assets
+          merge-multiple: true
+      - name: Verify checksums and publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+        run: python3 packaging/publish.py "$RELEASE_VERSION" release-assets

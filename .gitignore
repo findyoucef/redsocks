@@ -13,3 +13,4 @@ redsocks
 /tests/tun_test
 *.dSYM/
 /tests/pf_helper_test
+/dist/

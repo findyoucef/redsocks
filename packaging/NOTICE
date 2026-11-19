@@ -1,0 +1,8 @@
+redsocks: Copyright (C) 2007-2018 Leonid Evdokimov and contributors.
+Most source files carry Apache-2.0 notices. The bundled source preserves the
+individual notices, including base64.c (LGPL-2.1-or-later, Ryan Martell/FFmpeg),
+list.h (Linux-derived GPLv2 code), and md5.c/md5.h (Aladdin Enterprises license).
+License texts are in licenses/; complete corresponding redsocks source and
+build instructions are included in the source archive alongside this notice.
+Libevent is statically linked. Its installed distribution's copyright and
+license notices are included in licenses/libevent.txt.
