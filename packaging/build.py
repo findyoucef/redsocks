@@ -47,6 +47,8 @@ if mac:
     env['MACOSX_DEPLOYMENT_TARGET'] = '15.0'
 run('make', 'clean')
 makeargs = ['CC=clang' if mac else 'CC=gcc', f'LIBS={libevent}', f'RELEASE_VERSION={version}']
+if mac:
+    makeargs.append('LDFLAGS=-Wl,-fatal_warnings')
 run('make', '-j2', *makeargs, env=env)
 run('make', 'check', *makeargs, env=env)
 if mac:

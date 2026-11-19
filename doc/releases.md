@@ -57,13 +57,16 @@ asset set and SHA-256 manifest, then publishes it. A failed upload leaves a
 draft that the same run can resume. Published assets cannot be overwritten by
 this workflow; use a new version.
 
-Ordinary pushes to main, pull requests and manual workflow runs build preview
+Ordinary branch pushes, pull requests and manual workflow runs build preview
 packages with version `0.0.0` and retain their artifacts for 14 days. They do
 not create a GitHub Release. Download them from the workflow run's Artifacts
 section. These previews are for validation, not upgrades of installed releases.
 
 To reproduce a package locally, install Python 3.12+, the native build tools,
-and libevent development files, then run from a clean commit:
+and libevent development files, then run from a clean commit. On macOS, the
+libevent archive must also target macOS 15 or earlier (the CI macOS 15 runners
+supply this); newer-target library archives are rejected by the linker:
+
 
 ```sh
 python3 packaging/build.py 0.6.0

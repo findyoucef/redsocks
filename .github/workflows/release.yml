@@ -2,7 +2,7 @@ name: Packages and releases
 
 on:
   push:
-    branches: [main, feature/release-packages]
+    branches: ['**']
     tags: ['v*']
   pull_request:
   workflow_dispatch:
@@ -47,6 +47,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - name: Release gating regressions
+        run: python3 tests/package_publish_test.py
       - name: Linux dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libevent-dev pkg-config
