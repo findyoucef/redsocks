@@ -164,7 +164,6 @@ static void httpr_relay_read_cb(struct bufferevent *buffev, void *_arg)
 						redsocks_drop_client(client);
 						dropped = 1;
 					} else {
-						free(line);
 						char *auth_request = http_auth_request_header(buffev->input, NULL);
 
 						if (!auth_request) {
@@ -172,6 +171,7 @@ static void httpr_relay_read_cb(struct bufferevent *buffev, void *_arg)
 							redsocks_drop_client(client);
 							dropped = 1;
 						} else {
+							free(line);
 							free(auth->last_auth_query);
 							char *ptr = auth_request;
 

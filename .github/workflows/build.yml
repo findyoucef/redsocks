@@ -21,13 +21,16 @@ jobs:
             cc: clang
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node.js 24
       - name: Install libevent on Linux
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libevent-dev pkg-config
       - name: Install libevent on macOS
         if: runner.os == 'macOS'
-        run: brew install libevent pkgconf
+        run: |
+          for formula in libevent pkgconf; do
+            brew list --versions "$formula" >/dev/null || brew install "$formula"
+          done
       - name: Build
         run: make -j2 CC=${{ matrix.cc }}
       - name: TCP and UDP regression tests

@@ -632,13 +632,16 @@ static int redsocks_start_splicepump(redsocks_client *client)
 	evbuffer_unfreeze(client->relay->output, 1);
 
 	redsocks_pump *pump = red_pump(client);
-	if (!error)
-		error = pipe2(&pump->request.read, O_NONBLOCK);
-	if (!error)
-		error = pipe2(&pump->reply.read, O_NONBLOCK);
-	if (error) {
-		redsocks_log_errno(client, LOG_ERR, "pipe2");
-		return error;
+	splice_pipe *pipes[] = { &pump->request, &pump->reply };
+	for (size_t i = 0; i < SIZEOF_ARRAY(pipes); i++) {
+		int fds[2];
+		error = pipe2(fds, O_NONBLOCK);
+		if (error) {
+			redsocks_log_errno(client, LOG_ERR, "pipe2");
+			return error;
+		}
+		pipes[i]->read = fds[0];
+		pipes[i]->write = fds[1];
 	}
 
 	struct event_base *base = NULL;

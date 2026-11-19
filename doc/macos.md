@@ -272,7 +272,7 @@ Linux splice throughput.
 
 ## Verification
 
-The release and debug builds and all 15 portable regression tests pass in
+The release and debug builds and all 16 portable regression tests pass in
 GitHub Actions on Intel macOS, Apple Silicon macOS, Linux/GCC and Linux/Clang.
 The native Apple Silicon build uses Clang and libevent 2.1.13; the portable
 tests also pass under AddressSanitizer and UndefinedBehaviorSanitizer. The

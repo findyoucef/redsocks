@@ -40,6 +40,22 @@ class Proxy(socketserver.ThreadingTCPServer):
     daemon_threads = True
 
 
+class MissingAuthHandler(socketserver.BaseRequestHandler):
+    def handle(self):
+        self.request.settimeout(3)
+        try:
+            headers = b""
+            while not headers.endswith(b"\r\n\r\n"):
+                headers += receive(self.request, 1)
+                if len(headers) > 16384:
+                    raise ValueError("oversized request")
+            self.server.requests.append(headers)
+            self.request.sendall(b"HTTP/1.1 407 Proxy Authentication Required\r\n"
+                                 b"Content-Length: 0\r\n\r\n")
+        except Exception as error:
+            self.server.errors.append(error)
+
+
 class ProxyHandler(socketserver.BaseRequestHandler):
     def handle(self):
         sock = self.request
@@ -181,6 +197,27 @@ def echo(port, payload=b"tunneled bytes\r\n"):
 
 
 class NativeTests(unittest.TestCase):
+    def test_http_relay_missing_auth_header(self):
+        # A malformed challenge must close the connection without logging freed
+        # memory or double-freeing the status line. Repeat to check daemon health.
+        with Proxy(("127.0.0.1", 0), MissingAuthHandler) as upstream:
+            upstream.protocol, upstream.auth = "http-relay", True
+            upstream.requests, upstream.errors = [], []
+            thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+            thread.start()
+            try:
+                with redirector(upstream) as (port, process):
+                    for _ in range(2):
+                        with socket.create_connection(("127.0.0.1", port), timeout=3) as client:
+                            client.sendall(b"GET / HTTP/1.1\r\nHost: example.test\r\n\r\n")
+                            self.assertEqual(client.recv(1024), b"")
+                        self.assertIsNone(process.poll())
+                    self.assertEqual(len(upstream.requests), 2)
+                    self.assertEqual(upstream.errors, [])
+            finally:
+                upstream.shutdown()
+                thread.join(timeout=3)
+
     def test_http_connect_crlf(self):
         # Regresses #123: HTTP CONNECT must finish with libevent 2.1 headers.
         with proxy() as upstream, redirector(upstream) as (port, process):
